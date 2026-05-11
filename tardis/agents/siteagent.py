@@ -1,3 +1,5 @@
+from typing import Optional
+
 from ..interfaces.siteadapter import SiteAdapter
 from ..utilities.attributedict import AttributeDict
 from ..utilities.attributedict import convert_to_attribute_dict
@@ -36,7 +38,7 @@ class SiteAgent(SiteAdapter):
         return self._site_adapter.drone_heartbeat_interval
 
     @property
-    def drone_minimum_lifetime(self) -> int:
+    def drone_minimum_lifetime(self) -> Optional[int]:
         return self._site_adapter.drone_minimum_lifetime
 
     @property

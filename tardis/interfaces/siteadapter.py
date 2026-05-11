@@ -104,7 +104,7 @@ class SiteAdapter(metaclass=ABCMeta):
         return self.site_configuration.drone_heartbeat_interval
 
     @property
-    def drone_minimum_lifetime(self) -> [int, None]:
+    def drone_minimum_lifetime(self) -> Optional[int]:
         """
         Property that returns the configuration parameter drone_minimum_lifetime.
         It describes the minimum lifetime before a drone is automatically going

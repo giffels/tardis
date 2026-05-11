@@ -93,7 +93,7 @@ class Drone(Pool):
         return self.site_agent.drone_heartbeat_interval
 
     @property
-    def minimum_lifetime(self) -> [int, None]:
+    def minimum_lifetime(self) -> Optional[int]:
         return self.site_agent.drone_minimum_lifetime
 
     @property
