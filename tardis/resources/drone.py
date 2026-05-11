@@ -5,6 +5,7 @@ from tardis.agents.siteagent import SiteAgent
 from tardis.interfaces.plugin import Plugin
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.interfaces.state import State
+from tardis.resources.dronestates import AvailableState
 from .dronestates import DownState, RequestState
 from ..plugins.sqliteregistry import SqliteRegistry
 from ..utilities.attributedict import AttributeDict
@@ -150,9 +151,27 @@ class Drone(Pool):
         else:
             self._state = state
 
+        match state:
+            case AvailableState():
+                await self.refresh_drone_metrics()
+
     @property
-    def state(self) -> State:
+    def state(self) -> Optional[State]:
         return self._state
+
+    async def refresh_drone_metrics(self) -> None:
+        """
+        Synchronizes drone metrics with the batch system agent
+        """
+        self._allocation, self._utilisation = await asyncio.gather(
+            self.batch_system_agent.get_allocation(
+                drone_uuid=self.resource_attributes["drone_uuid"]
+            ),
+            self.batch_system_agent.get_utilisation(
+                drone_uuid=self.resource_attributes["drone_uuid"]
+            ),
+        )
+        self._supply = self.maximum_demand
 
     async def notify_plugins(self) -> None:
         for plugin in self._plugins:

@@ -177,15 +177,6 @@ class AvailableState(State):
 
         new_state = await cls.run_processing_pipeline(drone)
 
-        if isinstance(new_state, AvailableState):
-            drone._allocation = await drone.batch_system_agent.get_allocation(
-                drone_uuid=drone.resource_attributes["drone_uuid"]
-            )
-            drone._utilisation = await drone.batch_system_agent.get_utilisation(
-                drone_uuid=drone.resource_attributes["drone_uuid"]
-            )
-            drone._supply = drone.maximum_demand
-
         await drone.set_state(new_state)
 
 
