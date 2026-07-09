@@ -5,7 +5,7 @@ from tardis.exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
 from tardis.exceptions.executorexceptions import CommandExecutionFailure
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.utilities.attributedict import AttributeDict
-from tests.utilities.utilities import mock_executor_run_command, run_async
+from tests.utilities.utilities import mock_executor_run_command
 
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -93,7 +93,10 @@ class TestSlurmAdapter(TestCase):
         self.test_site_config.StatusUpdate = 10
         self.test_site_config.MachineTypeConfiguration = self.machine_type_configuration
         self.test_site_config.executor = self.mock_executor.return_value
-        self.test_site_config.bulk_delay = 0.01
+        # set to smallest positive float
+        # prevents BulkCall from blocking indefinitely on _get_bulk() when
+        # the event loop is closed before the semaphore is released by asyncio.run
+        self.test_site_config.bulk_delay = 0.01  # sys.float_info.min
 
         self.slurm_adapter = SlurmAdapter(
             machine_type="test2large", site_name="TestSite"
@@ -158,7 +161,7 @@ class TestSlurmAdapter(TestCase):
             AttributeDict(
                 remote_resource_uuid=1390065, resource_status=ResourceStatus.Booting
             ),
-            run_async(self.slurm_adapter.deploy_resource, resource_attributes),
+            asyncio.run(self.slurm_adapter.deploy_resource(resource_attributes)),
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -169,7 +172,7 @@ class TestSlurmAdapter(TestCase):
 
         self.test_site_config.MachineMetaData.test2large.Memory = 2.5
 
-        run_async(self.slurm_adapter.deploy_resource, resource_attributes)
+        asyncio.run(self.slurm_adapter.deploy_resource(resource_attributes))
 
         self.mock_executor.return_value.run_command.assert_called_with(
             "sbatch -p normal -N 1 -n 20 -t 60 --mem=2560mb --export=SLURM_Walltime=60,TardisDroneCores=20,TardisDroneMemory=2560,TardisDroneDisk=102400,TardisDroneUuid=testsite-1390065 pilot.sh"  # noqa: B950
@@ -179,7 +182,7 @@ class TestSlurmAdapter(TestCase):
 
         self.test_site_config.MachineMetaData.test2large.Memory = 2.546372129
 
-        run_async(self.slurm_adapter.deploy_resource, resource_attributes)
+        asyncio.run(self.slurm_adapter.deploy_resource(resource_attributes))
 
         self.mock_executor.return_value.run_command.assert_called_with(
             "sbatch -p normal -N 1 -n 20 -t 60 --mem=2607mb --export=SLURM_Walltime=60,TardisDroneCores=20,TardisDroneMemory=2607,TardisDroneDisk=102400,TardisDroneUuid=testsite-1390065 pilot.sh"  # noqa: B950
@@ -193,18 +196,19 @@ class TestSlurmAdapter(TestCase):
 
         slurm_adapter = SlurmAdapter(machine_type="test2large", site_name="TestSite")
 
-        run_async(
-            slurm_adapter.deploy_resource,
-            resource_attributes=AttributeDict(
-                machine_type="test2large",
-                site_name="TestSite",
-                obs_machine_meta_data_translation_mapping=AttributeDict(
-                    Cores=1,
-                    Memory=1000,
-                    Disk=1000,
+        asyncio.run(
+            slurm_adapter.deploy_resource(
+                resource_attributes=AttributeDict(
+                    machine_type="test2large",
+                    site_name="TestSite",
+                    obs_machine_meta_data_translation_mapping=AttributeDict(
+                        Cores=1,
+                        Memory=1000,
+                        Disk=1000,
+                    ),
+                    drone_uuid="testsite-1390065",
                 ),
-                drone_uuid="testsite-1390065",
-            ),
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -228,9 +232,10 @@ class TestSlurmAdapter(TestCase):
             AttributeDict(
                 resource_status=ResourceStatus.Booting, remote_resource_uuid=1390065
             ),
-            run_async(
-                self.slurm_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.slurm_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                ),
             ),
         )
 
@@ -253,9 +258,10 @@ class TestSlurmAdapter(TestCase):
             AttributeDict(
                 resource_status=ResourceStatus.Booting, remote_resource_uuid=1390065
             ),
-            run_async(
-                slurm_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                slurm_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                ),
             ),
         )
 
@@ -273,9 +279,10 @@ class TestSlurmAdapter(TestCase):
             AttributeDict(
                 resource_status=ResourceStatus.Running, remote_resource_uuid=1390065
             ),
-            run_async(
-                self.slurm_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.slurm_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                ),
             ),
         )
 
@@ -314,9 +321,10 @@ class TestSlurmAdapter(TestCase):
 
         for id, value in enumerate(state_translations.values()):
             job_id = int(f"{id + 1000}000")
-            returned_resource_attributes = run_async(
-                self.slurm_adapter.resource_status,
-                AttributeDict(remote_resource_uuid=job_id),
+            returned_resource_attributes = asyncio.run(
+                self.slurm_adapter.resource_status(
+                    AttributeDict(remote_resource_uuid=job_id),
+                )
             )
             self.assertEqual(returned_resource_attributes.resource_status, value)
 
@@ -330,12 +338,13 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command("")
     def test_resource_status_of_completed_jobs_w_empty_reply(self):
-        response = run_async(
-            self.slurm_adapter.resource_status,
-            AttributeDict(
-                resource_id="1390065",
-                remote_resource_uuid="1351043",
-            ),
+        response = asyncio.run(
+            self.slurm_adapter.resource_status(
+                AttributeDict(
+                    resource_id="1390065",
+                    remote_resource_uuid="1351043",
+                ),
+            )
         )
 
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
@@ -354,12 +363,13 @@ class TestSlurmAdapter(TestCase):
         ),
     )
     def test_resource_status_of_completed_jobs_w_raised_exception(self):
-        response = run_async(
-            self.slurm_adapter.resource_status,
-            AttributeDict(
-                resource_id="1390065",
-                remote_resource_uuid="1351043",
-            ),
+        response = asyncio.run(
+            self.slurm_adapter.resource_status(
+                AttributeDict(
+                    resource_id="1390065",
+                    remote_resource_uuid="1351043",
+                ),
+            )
         )
 
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
@@ -386,9 +396,12 @@ class TestSlurmAdapter(TestCase):
             ),
         ]
 
+        async def run_gather():
+            return await asyncio.gather(*tasks)
+
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(asyncio.gather, *tasks)
+                asyncio.run(run_gather())
 
         self.mock_executor.return_value.run_command.assert_called_with(
             'squeue -o "%A|%N|%T" -h -t all --job=1351043,1351044'
@@ -403,9 +416,10 @@ class TestSlurmAdapter(TestCase):
     def test_resource_status_update_failed(self):
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(
-                    self.slurm_adapter.resource_status,
-                    AttributeDict(remote_resource_uuid="1390065"),
+                asyncio.run(
+                    self.slurm_adapter.resource_status(
+                        AttributeDict(remote_resource_uuid="1390065"),
+                    )
                 )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -414,9 +428,10 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(stdout="", stderr="", exit_code=0)
     def test_stop_resource(self):
-        run_async(
-            self.slurm_adapter.stop_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            self.slurm_adapter.stop_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -425,9 +440,10 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(stdout="", stderr="", exit_code=0)
     def test_terminate_resource(self):
-        run_async(
-            self.slurm_adapter.terminate_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            self.slurm_adapter.terminate_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -445,9 +461,10 @@ class TestSlurmAdapter(TestCase):
 
         slurm_adapter = SlurmAdapter(machine_type="test2large", site_name="TestSite")
 
-        run_async(
-            slurm_adapter.terminate_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            slurm_adapter.terminate_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(

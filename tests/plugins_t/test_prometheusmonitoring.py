@@ -8,7 +8,9 @@ from unittest import TestCase
 from unittest.mock import Mock
 from unittest.mock import patch
 
-from tests.utilities.utilities import get_free_port, run_async
+from tests.utilities.utilities import get_free_port
+
+import asyncio
 
 
 class TestPrometheusMonitoring(TestCase):
@@ -36,38 +38,38 @@ class TestPrometheusMonitoring(TestCase):
     def test_notify(self):
         test_state = RequestState()
 
-        run_async(
-            self.plugin.notify, test_state, get_test_param("6", ResourceStatus.Booting)
+        asyncio.run(
+            self.plugin.notify(test_state, get_test_param("6", ResourceStatus.Booting))
         )
         self.assert_gauges([1, 0, 0, 0, 0])
 
-        run_async(
-            self.plugin.notify, test_state, get_test_param("6", ResourceStatus.Running)
+        asyncio.run(
+            self.plugin.notify(test_state, get_test_param("6", ResourceStatus.Running))
         )
         self.assert_gauges([0, 1, 0, 0, 0])
 
-        run_async(
-            self.plugin.notify, test_state, get_test_param("6", ResourceStatus.Stopped)
+        asyncio.run(
+            self.plugin.notify(test_state, get_test_param("6", ResourceStatus.Stopped))
         )
         self.assert_gauges([0, 0, 1, 0, 0])
 
-        run_async(
-            self.plugin.notify, test_state, get_test_param("6", ResourceStatus.Deleted)
+        asyncio.run(
+            self.plugin.notify(test_state, get_test_param("6", ResourceStatus.Deleted))
         )
         self.assert_gauges([0, 0, 0, 1, 0])
 
-        run_async(
-            self.plugin.notify, test_state, get_test_param("7", ResourceStatus.Error)
+        asyncio.run(
+            self.plugin.notify(test_state, get_test_param("7", ResourceStatus.Error))
         )
         self.assert_gauges([0, 0, 0, 1, 1])
 
-        run_async(
-            self.plugin.notify, test_state, get_test_param("9", ResourceStatus.Booting)
+        asyncio.run(
+            self.plugin.notify(test_state, get_test_param("9", ResourceStatus.Booting))
         )
         self.assert_gauges([1, 0, 0, 1, 1])
 
-        run_async(
-            self.plugin.notify, test_state, get_test_param("8", ResourceStatus.Error)
+        asyncio.run(
+            self.plugin.notify(test_state, get_test_param("8", ResourceStatus.Error))
         )
         self.assert_gauges([1, 0, 0, 1, 2])
 

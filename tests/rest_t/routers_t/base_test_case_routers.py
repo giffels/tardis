@@ -1,11 +1,12 @@
 from tardis.rest.app.security import get_user
 from tardis.utilities.attributedict import AttributeDict
-from tests.utilities.utilities import run_async
 
 from httpx import AsyncClient, ASGITransport
 
 from unittest import TestCase
 from unittest.mock import patch
+
+import asyncio
 
 
 class TestCaseRouters(TestCase):
@@ -62,12 +63,12 @@ class TestCaseRouters(TestCase):
         return self.config.Services.restapi.get_user.return_value.scopes
 
     def tearDown(self) -> None:
-        run_async(self.client.aclose)
+        asyncio.run(self.client.aclose())
 
     def login(self, user: dict = None):
         self.clear_lru_cache()
-        response = run_async(
-            self.client.post, "/user/login", json=user or self.test_user
+        response = asyncio.run(
+            self.client.post("/user/login", json=user or self.test_user)
         )
         self.assertEqual(response.status_code, 200)
 

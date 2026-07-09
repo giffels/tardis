@@ -1,9 +1,3 @@
-from tests.utilities.utilities import (
-    async_return,
-    run_async,
-    set_awaitable_return_value,
-)
-
 from tardis.interfaces.plugin import Plugin
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.interfaces.state import State
@@ -14,7 +8,9 @@ from tardis.utilities.attributedict import AttributeDict
 
 from logging import DEBUG
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import asyncio
 
 
 class TestDrone(TestCase):
@@ -41,7 +37,7 @@ class TestDrone(TestCase):
         self.mock_site_agent.drone_minimum_lifetime = None
         self.mock_site_agent.drone_heartbeat_interval = 60
         self.mock_plugin = MagicMock(spec=Plugin)()
-        self.mock_plugin.notify.return_value = async_return()
+        self.mock_plugin.notify = AsyncMock()
         self.drone = Drone(
             site_agent=self.mock_site_agent,
             batch_system_agent=self.mock_batch_system_agent,
@@ -65,24 +61,24 @@ class TestDrone(TestCase):
         self.assertEqual(self.drone._database, sql_registry)
 
     def test_database_state(self):
-        self.assertIsNone(run_async(self.drone.database_state))
+        self.assertIsNone(asyncio.run(self.drone.database_state()))
 
         sql_registry = MagicMock(spec=SqliteRegistry)
         self.drone.register_plugins(sql_registry)
         self.drone.__dict__.pop("_database")  # reset cached_property's cache
-        set_awaitable_return_value(
-            sql_registry.get_resource_state, [{"state": "DrainState"}]
+        sql_registry.get_resource_state = AsyncMock(
+            return_value=[{"state": "DrainState"}]
         )
 
-        self.assertIsInstance(run_async(self.drone.database_state), DrainState)
+        self.assertIsInstance(asyncio.run(self.drone.database_state()), DrainState)
 
         # testing IndexError
-        set_awaitable_return_value(sql_registry.get_resource_state, [])
-        self.assertIsNone(run_async(self.drone.database_state))
+        sql_registry.get_resource_state = AsyncMock(return_value=[])
+        self.assertIsNone(asyncio.run(self.drone.database_state()))
 
         # testing AttributeError
         del self.drone.resource_attributes.drone_uuid
-        self.assertIsNone(run_async(self.drone.database_state))
+        self.assertIsNone(asyncio.run(self.drone.database_state()))
 
     def test_demand(self):
         self.assertEqual(self.drone.demand, 8)
@@ -127,7 +123,7 @@ class TestDrone(TestCase):
 
         mocked_request_state.return_value.run.side_effect = EndOfLoop
         with self.assertRaises(EndOfLoop):
-            run_async(self.drone.run)
+            asyncio.run(self.drone.run())
 
         # Actual test code
         self.assertIsInstance(self.drone.state, RequestState)
@@ -135,11 +131,10 @@ class TestDrone(TestCase):
             self.drone.resource_attributes.resource_status, ResourceStatus.Booting
         )
 
-    @patch("tardis.resources.drone.asyncio.sleep")
+    @patch("tardis.resources.drone.asyncio.sleep", new_callable=AsyncMock)
     def test_run(self, mocked_asyncio_sleep):
-        mocked_asyncio_sleep.side_effect = async_return
         mocked_down_state = MagicMock(spec=DownState)
-        mocked_down_state.run.return_value = async_return()
+        mocked_down_state.run = AsyncMock()
 
         async def mocked_run(drone):
             await drone.set_state(mocked_down_state)
@@ -147,11 +142,11 @@ class TestDrone(TestCase):
         mocked_state = MagicMock(spec=State)
         mocked_state.run.side_effect = mocked_run
 
-        run_async(self.drone.set_state, mocked_state)
+        asyncio.run(self.drone.set_state(mocked_state))
         self.drone.demand = 8
         self.mock_site_agent.drone_heartbeat_interval = 10
         with self.assertLogs(level=DEBUG):
-            run_async(self.drone.run)
+            asyncio.run(self.drone.run())
 
         # duration skipped via asyncio.sleep
         # use the `sum` to avoid `asyncio.sleep(0)` context switches to skew the result
@@ -178,12 +173,12 @@ class TestDrone(TestCase):
     def test_set_state(self):
         self.drone.register_plugins(self.mock_plugin)
         old_update_time_stamp = self.drone.resource_attributes.updated
-        run_async(self.drone.set_state, self.drone._state)
+        asyncio.run(self.drone.set_state(self.drone._state))
         self.mock_plugin.notify.assert_not_called()
         self.assertEqual(self.drone.resource_attributes.updated, old_update_time_stamp)
 
         new_state = DownState()
-        run_async(self.drone.set_state, new_state)
+        asyncio.run(self.drone.set_state(new_state))
         self.mock_plugin.notify.assert_called_with(
             new_state, self.drone.resource_attributes
         )
@@ -199,7 +194,7 @@ class TestDrone(TestCase):
         self.drone.register_plugins(self.mock_plugin)
         self.assertEqual(self.drone._plugins, [self.mock_plugin])
 
-        run_async(self.drone.notify_plugins)
+        asyncio.run(self.drone.notify_plugins())
         self.mock_plugin.notify.assert_called_with(
             self.drone.state, self.drone.resource_attributes
         )

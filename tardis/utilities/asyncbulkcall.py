@@ -1,4 +1,4 @@
-from functools import cached_property
+from dataclasses import dataclass
 from typing import TypeVar, Generic, Iterable, List, Tuple, Optional, Set
 from typing_extensions import Protocol
 import asyncio
@@ -7,6 +7,24 @@ import sys
 
 T = TypeVar("T")
 R = TypeVar("R")
+
+
+@dataclass
+class LoopBoundResources:
+    """
+    Container for asyncio primitives bound to a specific event loop lifecycle
+
+    When an event loop is replaced (for example, between separate unit tests using
+    :py:func:`asyncio.run`), any existing queue or semaphore from the old loop
+    becomes stale and unusable. This class bundles those loop-bound resources
+    together so they can be discarded and re-initialized as a single unit.
+
+    :param queue: The active queue of outstanding tasks and their result futures
+    :param concurrent: The semaphore limiting concurrent executions of the bulk command
+    """
+
+    queue: Optional[asyncio.Queue]
+    concurrent: Optional[asyncio.BoundedSemaphore]
 
 
 class BulkCommand(Protocol[T, R]):
@@ -73,17 +91,34 @@ class AsyncBulkCall(Generic[T, R]):
         self._dispatch_task: Optional[asyncio.Task] = None
         # tasks handling individual command executions
         self._bulk_tasks: Set[asyncio.Task] = set()
+
+        # Track active event loop states to safely handle multi-loop runs
+        # (like unittests)
+        self._current_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_resources = LoopBoundResources(queue=None, concurrent=None)
+
         self._verify_settings()
 
-    @cached_property
+    def _get_loop_resources(self) -> LoopBoundResources:
+        """Dynamically ensures resources match the currently running event loop."""
+        current_loop = asyncio.get_running_loop()
+        if self._current_loop != current_loop:
+            self._current_loop = current_loop
+            self._loop_resources = LoopBoundResources(
+                queue=asyncio.Queue(),
+                concurrent=asyncio.BoundedSemaphore(value=self._concurrency),
+            )
+        return self._loop_resources
+
+    @property
     def _concurrent(self) -> "asyncio.BoundedSemaphore":
         """synchronized counter for active commands"""
-        return asyncio.BoundedSemaphore(value=self._concurrency)
+        return self._get_loop_resources().concurrent
 
-    @cached_property
+    @property
     def _queue(self) -> "asyncio.Queue[Tuple[T, asyncio.Future[R]]]":
         """queue of outstanding tasks"""
-        return asyncio.Queue()
+        return self._get_loop_resources().queue
 
     def _verify_settings(self):
         if not isinstance(self._size, int) or self._size <= 0:
@@ -98,11 +133,11 @@ class AsyncBulkCall(Generic[T, R]):
 
     async def __call__(self, __task: T) -> R:
         """Queue a ``task`` for bulk execution and return the result when available"""
-        result: "asyncio.Future[R]" = asyncio.get_event_loop().create_future()
+        result: "asyncio.Future[R]" = asyncio.get_running_loop().create_future()
         # queue item first so that the dispatch task does not finish before
         self._queue.put_nowait((__task, result))
         # ensure there is a worker to dispatch items for command execution
-        if self._dispatch_task is None:
+        if self._dispatch_task is None or self._dispatch_task.done():
             self._dispatch_task = asyncio.ensure_future(self._bulk_dispatch())
         return await result
 
@@ -118,7 +153,7 @@ class AsyncBulkCall(Generic[T, R]):
             # we must release the claim *in the task* when it is done.
             await self._concurrent.acquire()
             task = asyncio.ensure_future(self._bulk_execute(tuple(tasks), futures))
-            task.add_done_callback(lambda _: self._concurrent.release)
+            task.add_done_callback(lambda _, sem=self._concurrent: sem.release())
             # track tasks via strong references to avoid them being garbage collected.
             # see bpo#44665
             self._bulk_tasks.add(task)
@@ -166,7 +201,9 @@ class AsyncBulkCall(Generic[T, R]):
                 )
         except Exception as task_exception:
             for future in futures:
-                future.set_exception(task_exception)
+                if not future.done():
+                    future.set_exception(task_exception)
         else:
             for future, result in zip(futures, results):  # noqa B905
-                future.set_result(result)
+                if not future.done():
+                    future.set_result(result)

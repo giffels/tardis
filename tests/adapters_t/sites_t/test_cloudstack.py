@@ -7,12 +7,9 @@ from tardis.exceptions.tardisexceptions import TardisQuotaExceeded
 from tardis.exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
 from CloudStackAIO.CloudStack import CloudStackClientException
 
-from tests.utilities.utilities import async_return
-from tests.utilities.utilities import run_async
-
 from aiohttp import ClientConnectionError
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import asyncio
 import logging
@@ -59,7 +56,7 @@ class TestCloudStackAdapter(TestCase):
                 name="testsite-089123", id="123456", state="Present"
             )
         )
-        cloudstack_api.deployVirtualMachine.return_value = async_return(
+        cloudstack_api.deployVirtualMachine = AsyncMock(
             return_value=self.deploy_return_value
         )
         self.list_vm_return_value = AttributeDict(
@@ -67,15 +64,13 @@ class TestCloudStackAdapter(TestCase):
                 AttributeDict(name="testsite-089123", id="123456", state="Running")
             ]
         )
-        cloudstack_api.listVirtualMachines.return_value = async_return(
+        cloudstack_api.listVirtualMachines = AsyncMock(
             return_value=self.list_vm_return_value
         )
 
-        cloudstack_api.stopVirtualMachine.return_value = async_return(return_value=None)
+        cloudstack_api.stopVirtualMachine = AsyncMock(return_value=None)
 
-        cloudstack_api.destroyVirtualMachine.return_value = async_return(
-            return_value=None
-        )
+        cloudstack_api.destroyVirtualMachine = AsyncMock(return_value=None)
 
         self.cloudstack_adapter = CloudStackAdapter(
             machine_type="test2large", site_name="TestSite"
@@ -86,9 +81,10 @@ class TestCloudStackAdapter(TestCase):
 
     def test_deploy_resource(self):
         self.assertEqual(
-            run_async(
-                self.cloudstack_adapter.deploy_resource,
-                resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+            asyncio.run(
+                self.cloudstack_adapter.deploy_resource(
+                    resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+                )
             ),
             AttributeDict(
                 drone_uuid="testsite-089123",
@@ -119,9 +115,10 @@ class TestCloudStackAdapter(TestCase):
 
     def test_resource_status(self):
         self.assertEqual(
-            run_async(
-                self.cloudstack_adapter.resource_status,
-                resource_attributes=AttributeDict(remote_resource_uuid="123456"),
+            asyncio.run(
+                self.cloudstack_adapter.resource_status(
+                    resource_attributes=AttributeDict(remote_resource_uuid="123456")
+                ),
             ),
             AttributeDict(
                 drone_uuid="testsite-089123",
@@ -134,9 +131,10 @@ class TestCloudStackAdapter(TestCase):
         )
 
     def test_stop_resource(self):
-        run_async(
-            self.cloudstack_adapter.stop_resource,
-            resource_attributes=AttributeDict(remote_resource_uuid="123456"),
+        asyncio.run(
+            self.cloudstack_adapter.stop_resource(
+                resource_attributes=AttributeDict(remote_resource_uuid="123456")
+            ),
         )
 
         self.mock_cloudstack_api.return_value.stopVirtualMachine.assert_called_with(
@@ -144,9 +142,10 @@ class TestCloudStackAdapter(TestCase):
         )
 
     def test_terminate_resource(self):
-        run_async(
-            self.cloudstack_adapter.terminate_resource,
-            resource_attributes=AttributeDict(remote_resource_uuid="123456"),
+        asyncio.run(
+            self.cloudstack_adapter.terminate_resource(
+                resource_attributes=AttributeDict(remote_resource_uuid="123456")
+            ),
         )
 
         self.mock_cloudstack_api.return_value.destroyVirtualMachine.assert_called_with(

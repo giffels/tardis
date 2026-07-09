@@ -6,7 +6,6 @@ from tardis.exceptions.tardisexceptions import TardisTimeout
 from tardis.exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
 from tardis.utilities.attributedict import AttributeDict
 from tardis.interfaces.siteadapter import ResourceStatus
-from tests.utilities.utilities import async_return, run_async
 
 from aiohttp import ClientConnectionError
 from aiohttp import ContentTypeError
@@ -14,7 +13,7 @@ from simple_rest_client.exceptions import AuthError
 from simple_rest_client.exceptions import ClientError
 
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import asyncio
 import logging
@@ -59,14 +58,12 @@ class TestOpenStackAdapter(TestCase):
         )
 
         openstack_api = self.mock_openstack_api.return_value
-        openstack_api.init_api.return_value = async_return(return_value=None)
+        openstack_api.init_api = AsyncMock(return_value=None)
 
         self.create_return_value = AttributeDict(
             server=AttributeDict(name="testsite-089123")
         )
-        openstack_api.servers.create.return_value = async_return(
-            return_value=self.create_return_value
-        )
+        openstack_api.servers.create = AsyncMock(return_value=self.create_return_value)
 
         self.get_return_value = AttributeDict(
             server=AttributeDict(
@@ -77,19 +74,13 @@ class TestOpenStackAdapter(TestCase):
                 updated="2023-07-31T12:46:50Z",
             )
         )
-        openstack_api.servers.get.return_value = async_return(
-            return_value=self.get_return_value
-        )
+        openstack_api.servers.get = AsyncMock(return_value=self.get_return_value)
 
-        openstack_api.servers.run_action.return_value = async_return(return_value=None)
+        openstack_api.servers.run_action = AsyncMock(return_value=None)
 
-        openstack_api.servers.force_delete.return_value = async_return(
-            return_value=None
-        )
+        openstack_api.servers.force_delete = AsyncMock(return_value=None)
 
-        self.mock_openstack_api.return_value.init_api.return_value = async_return(
-            return_value=True
-        )
+        self.mock_openstack_api.return_value.init_api = AsyncMock(return_value=True)
         self.openstack_adapter = OpenStackAdapter(
             machine_type="test2large", site_name="TestSite"
         )
@@ -117,9 +108,10 @@ class TestOpenStackAdapter(TestCase):
 
     def test_deploy_resource(self):
         self.assertEqual(
-            run_async(
-                self.openstack_adapter.deploy_resource,
-                resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+            asyncio.run(
+                self.openstack_adapter.deploy_resource(
+                    resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+                )
             ),
             AttributeDict(drone_uuid="testsite-089123"),
         )
@@ -147,12 +139,13 @@ class TestOpenStackAdapter(TestCase):
 
     def test_resource_status(self):
         self.assertEqual(
-            run_async(
-                self.openstack_adapter.resource_status,
-                resource_attributes=AttributeDict(
-                    drone_uuid="testsite-089123",
-                    remote_resource_uuid="029312-1231-123123",
-                    resource_status=ResourceStatus.Booting,
+            asyncio.run(
+                self.openstack_adapter.resource_status(
+                    resource_attributes=AttributeDict(
+                        drone_uuid="testsite-089123",
+                        remote_resource_uuid="029312-1231-123123",
+                        resource_status=ResourceStatus.Booting,
+                    )
                 ),
             ),
             AttributeDict(
@@ -167,11 +160,12 @@ class TestOpenStackAdapter(TestCase):
         )
 
     def test_stop_resource(self):
-        run_async(
-            self.openstack_adapter.stop_resource,
-            resource_attributes=AttributeDict(
-                remote_resource_uuid="029312-1231-123123"
-            ),
+        asyncio.run(
+            self.openstack_adapter.stop_resource(
+                resource_attributes=AttributeDict(
+                    remote_resource_uuid="029312-1231-123123"
+                )
+            )
         )
         params = {"os-stop": None}
         self.mock_openstack_api.return_value.init_api.assert_called_with(timeout=60)
@@ -180,11 +174,12 @@ class TestOpenStackAdapter(TestCase):
         )
 
     def test_terminate_resource(self):
-        run_async(
-            self.openstack_adapter.terminate_resource,
-            resource_attributes=AttributeDict(
-                remote_resource_uuid="029312-1231-123123"
-            ),
+        asyncio.run(
+            self.openstack_adapter.terminate_resource(
+                resource_attributes=AttributeDict(
+                    remote_resource_uuid="029312-1231-123123"
+                )
+            )
         )
 
         self.mock_openstack_api.return_value.init_api.assert_called_with(timeout=60)

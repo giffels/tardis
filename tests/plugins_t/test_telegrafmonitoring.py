@@ -4,12 +4,10 @@ from tardis.utilities.attributedict import AttributeDict
 
 from datetime import datetime
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from unittest.mock import patch
 
-from tests.utilities.utilities import async_return
-from tests.utilities.utilities import run_async
-
+import asyncio
 import platform
 
 
@@ -39,8 +37,8 @@ class TestTelegrafMonitoring(TestCase):
         self.config.Plugins.TelegrafMonitoring.metric = "tardis_data"
 
         telegraf_client = self.mock_aiotelegraf.Client.return_value
-        telegraf_client.connect.return_value = async_return()
-        telegraf_client.close.return_value = async_return()
+        telegraf_client.connect = AsyncMock()
+        telegraf_client.close = AsyncMock()
 
         self.plugin = TelegrafMonitoring()
 
@@ -64,7 +62,7 @@ class TestTelegrafMonitoring(TestCase):
             machine_type=test_param.machine_type,
             drone_uuid=test_param.drone_uuid,
         )
-        run_async(self.plugin.notify, test_state, test_param)
+        asyncio.run(self.plugin.notify(test_state, test_param))
         self.mock_aiotelegraf.Client.assert_called_with(
             host="telegraf.test",
             port=1234,
@@ -84,7 +82,7 @@ class TestTelegrafMonitoring(TestCase):
             "tardis_machine_name": "my_test_node",
         }
         self.plugin = TelegrafMonitoring()
-        run_async(self.plugin.notify, test_state, test_param)
+        asyncio.run(self.plugin.notify(test_state, test_param))
 
         self.mock_aiotelegraf.Client.assert_called_with(
             host="telegraf.test",

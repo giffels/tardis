@@ -1,9 +1,10 @@
 from tardis.rest.app import crud
 from tardis.plugins.sqliteregistry import SqliteRegistry
-from tests.utilities.utilities import run_async
 
 from unittest import TestCase
 from unittest.mock import MagicMock
+
+import asyncio
 
 
 class TestCRUD(TestCase):
@@ -25,10 +26,11 @@ class TestCRUD(TestCase):
 
         self.assertEqual(
             [],
-            run_async(
-                crud.get_resource_state,
-                sql_registry=self.sql_registry_mock,
-                drone_uuid="test-noexists-01234567ab",
+            asyncio.run(
+                crud.get_resource_state(
+                    sql_registry=self.sql_registry_mock,
+                    drone_uuid="test-noexists-01234567ab",
+                )
             ),
         )
 
@@ -45,10 +47,11 @@ class TestCRUD(TestCase):
 
         self.assertEqual(
             [{"drone_uuid": "test-01234567ab", "state": "AvailableState"}],
-            run_async(
-                crud.get_resource_state,
-                sql_registry=self.sql_registry_mock,
-                drone_uuid="test-available-01234567ab",
+            asyncio.run(
+                crud.get_resource_state(
+                    sql_registry=self.sql_registry_mock,
+                    drone_uuid="test-available-01234567ab",
+                )
             ),
         )
 
@@ -90,9 +93,10 @@ class TestCRUD(TestCase):
 
         self.assertEqual(
             full_expected_resources,
-            run_async(
-                crud.get_resources,
-                sql_registry=self.sql_registry_mock,
+            asyncio.run(
+                crud.get_resources(
+                    sql_registry=self.sql_registry_mock,
+                ),
             ),
         )
 

@@ -1,6 +1,7 @@
-from unittest.mock import ANY
+from unittest.mock import ANY, AsyncMock
 from tests.rest_t.routers_t.base_test_case_routers import TestCaseRouters
-from tests.utilities.utilities import async_return, run_async
+
+import asyncio
 
 
 class TestResources(TestCaseRouters):
@@ -13,13 +14,14 @@ class TestResources(TestCaseRouters):
 
     def test_get_resource_state(self):
         self.clear_lru_cache()
-        self.mock_crud.get_resource_state.return_value = async_return(
+        self.mock_crud.get_resource_state = AsyncMock(
             return_value=[{"drone_uuid": "test-0123456789", "state": "AvailableState"}]
         )
 
-        response = run_async(
-            self.client.get,
-            "/resources/test-0123456789/state",
+        response = asyncio.run(
+            self.client.get(
+                "/resources/test-0123456789/state",
+            )
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -27,12 +29,12 @@ class TestResources(TestCaseRouters):
             {"drone_uuid": "test-0123456789", "state": "AvailableState"},
         )
 
-        self.mock_crud.get_resource_state.return_value = async_return(return_value=[])
-        response = run_async(self.client.get, "/resources/test-1234567890/state")
+        self.mock_crud.get_resource_state = AsyncMock(return_value=[])
+        response = asyncio.run(self.client.get("/resources/test-1234567890/state"))
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "Drone not found"})
 
-        response = run_async(self.client.get, "/resources/test-invalid/state")
+        response = asyncio.run(self.client.get("/resources/test-invalid/state"))
         self.assertEqual(response.status_code, 422)
         self.assertEqual(
             response.json(),
@@ -48,17 +50,14 @@ class TestResources(TestCaseRouters):
             },
         )
 
-        response = run_async(
-            self.client.get,
-            "/resources/state",
-        )
+        response = asyncio.run(self.client.get("/resources/state"))
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "Not Found"})
 
         # missing scope
         self.set_scopes(["resources:patch"])
         self.login()
-        response = run_async(self.client.get, "/resources/test-0123456789/state")
+        response = asyncio.run(self.client.get("/resources/test-0123456789/state"))
         self.assertEqual(response.status_code, 403)
 
     def test_get_resources(self):
@@ -83,11 +82,9 @@ class TestResources(TestCaseRouters):
                 "updated": "2021-10-08T12:42:30.648325",
             },
         ]
-        self.mock_crud.get_resources.return_value = async_return(
-            return_value=full_expected_resources
-        )
+        self.mock_crud.get_resources = AsyncMock(return_value=full_expected_resources)
 
-        response = run_async(self.client.get, "/resources/")
+        response = asyncio.run(self.client.get("/resources/"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
@@ -97,14 +94,14 @@ class TestResources(TestCaseRouters):
         # missing scope
         self.set_scopes(["resources:patch"])
         self.login()
-        response = run_async(self.client.get, "/resources/")
+        response = asyncio.run(self.client.get("/resources/"))
         self.assertEqual(response.status_code, 403)
 
     def test_drain_drone(self):
         self.clear_lru_cache()
-        self.mock_crud.set_state_to_draining.return_value = async_return()
+        self.mock_crud.set_state_to_draining = AsyncMock()
 
-        response = run_async(self.client.patch, "/resources/test-0125bc9fd8/drain")
+        response = asyncio.run(self.client.patch("/resources/test-0125bc9fd8/drain"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"msg": "Drone set to DrainState"})
 
@@ -116,5 +113,5 @@ class TestResources(TestCaseRouters):
         # missing scope
         self.set_scopes(["resources:get"])
         self.login()
-        response = run_async(self.client.patch, "/resources/test-0125bc9fd8/drain")
+        response = asyncio.run(self.client.patch("/resources/test-0125bc9fd8/drain"))
         self.assertEqual(response.status_code, 403)

@@ -18,10 +18,9 @@ from datetime import datetime
 from unittest import TestCase
 from unittest.mock import patch
 
-from tests.utilities.utilities import async_return
-from tests.utilities.utilities import run_async
-
 from unittest.mock import AsyncMock
+
+import asyncio
 
 
 class TestAuditor(TestCase):
@@ -94,8 +93,8 @@ class TestAuditor(TestCase):
         self.mock_address = self.mock_builder.address.return_value
         self.mock_timeout = self.mock_address.timeout.return_value
         self.client = self.mock_timeout.build.return_value
-        self.client.add.return_value = async_return()
-        self.client.update.return_value = async_return()
+        self.client.add = AsyncMock()
+        self.client.update = AsyncMock()
 
         self.config = config
         self.plugin = Auditor()
@@ -168,19 +167,21 @@ class TestAuditor(TestCase):
             self.client_cert_path, self.client_key_path, self.ca_cert_path
         )
 
-        run_async(
-            self.plugin.notify,
-            state=AvailableState(),
-            resource_attributes=self.test_param,
+        asyncio.run(
+            self.plugin.notify(
+                state=AvailableState(),
+                resource_attributes=self.test_param,
+            )
         )
 
         self.client.add.assert_called_once()
         self.client.update.assert_not_called()
 
-        run_async(
-            self.plugin.notify,
-            state=DownState(),
-            resource_attributes=self.test_param,
+        asyncio.run(
+            self.plugin.notify(
+                state=DownState(),
+                resource_attributes=self.test_param,
+            )
         )
 
         self.assertEqual(self.client.add.call_count, 1)
@@ -197,10 +198,11 @@ class TestAuditor(TestCase):
             DrainingState(),
             DisintegrateState(),
         ]:
-            run_async(
-                self.plugin.notify,
-                state=state,
-                resource_attributes=self.test_param,
+            asyncio.run(
+                self.plugin.notify(
+                    state=state,
+                    resource_attributes=self.test_param,
+                )
             )
             self.assertEqual(self.client.add.call_count, 1)
             self.assertEqual(self.client.update.call_count, 1)
@@ -210,10 +212,11 @@ class TestAuditor(TestCase):
             "Reqwest Error: HTTP status client error (404 Not Found) "
             "for url (http://127.0.0.1:8000/update)"
         )
-        run_async(
-            self.plugin.notify,
-            state=DownState(),
-            resource_attributes=self.test_param,
+        asyncio.run(
+            self.plugin.notify(
+                state=DownState(),
+                resource_attributes=self.test_param,
+            )
         )
 
         self.client.update.side_effect = RuntimeError(
@@ -221,26 +224,29 @@ class TestAuditor(TestCase):
             "for url (http://127.0.0.1:8000/update)"
         )
         with self.assertRaises(RuntimeError):
-            run_async(
-                self.plugin.notify,
-                state=DownState(),
-                resource_attributes=self.test_param,
+            asyncio.run(
+                self.plugin.notify(
+                    state=DownState(),
+                    resource_attributes=self.test_param,
+                )
             )
 
         self.client.update.side_effect = RuntimeError("Does not match RegEx")
         with self.assertRaises(RuntimeError):
-            run_async(
-                self.plugin.notify,
-                state=DownState(),
-                resource_attributes=self.test_param,
+            asyncio.run(
+                self.plugin.notify(
+                    state=DownState(),
+                    resource_attributes=self.test_param,
+                )
             )
 
         self.client.update.side_effect = ValueError("Other exception")
         with self.assertRaises(ValueError):
-            run_async(
-                self.plugin.notify,
-                state=DownState(),
-                resource_attributes=self.test_param,
+            asyncio.run(
+                self.plugin.notify(
+                    state=DownState(),
+                    resource_attributes=self.test_param,
+                )
             )
 
         self.client.update.side_effect = None
