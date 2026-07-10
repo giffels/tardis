@@ -6,6 +6,7 @@ from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.utilities.attributedict import AttributeDict
 from tests.utilities.utilities import mock_executor_run_command
 
+
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -158,7 +159,12 @@ class TestHTCondorSiteAdapter(TestCase):
             ),
         )
 
-    @mock_executor_run_command(stdout=CONDOR_SUBMIT_OUTPUT)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_SUBMIT_OUTPUT),
+        ]
+        * 5
+    )
     def test_deploy_resource_htcondor_obs(self):
         response = asyncio.run(
             self.adapter.deploy_resource(
@@ -297,7 +303,11 @@ class TestHTCondorSiteAdapter(TestCase):
     def test_site_name(self):
         self.assertEqual(self.adapter.site_name, "TestSite")
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_IDLE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_IDLE),
+        ]
+    )
     def test_resource_status_idle(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -306,7 +316,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertEqual(response.resource_status, ResourceStatus.Booting)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_RUN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_RUN),
+        ]
+    )
     def test_resource_status_run(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -315,7 +329,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertEqual(response.resource_status, ResourceStatus.Running)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_REMOVING)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_REMOVING),
+        ]
+    )
     def test_resource_status_removing(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -324,7 +342,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertEqual(response.resource_status, ResourceStatus.Running)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_COMPLETED)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_COMPLETED),
+        ]
+    )
     def test_resource_status_completed(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -333,7 +355,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_HELD)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_HELD),
+        ]
+    )
     def test_resource_status_held(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -342,7 +368,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertEqual(response.resource_status, ResourceStatus.Error)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_TRANSFERING_OUTPUT)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_TRANSFERING_OUTPUT),
+        ]
+    )
     def test_resource_status_transfering_output(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -351,7 +381,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertEqual(response.resource_status, ResourceStatus.Running)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_SUSPENDED)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_SUSPENDED),
+        ]
+    )
     def test_resource_status_unexpanded(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -361,10 +395,11 @@ class TestHTCondorSiteAdapter(TestCase):
         self.assertEqual(response.resource_status, ResourceStatus.Stopped)
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-        ),
+        [
+            CommandExecutionFailure(
+                message="Failed", stdout="Failed", stderr="Failed", exit_code=2
+            ),
+        ]
     )
     def test_resource_status_command_execution_error(self):
         with self.assertLogs(level=logging.WARNING):
@@ -377,7 +412,11 @@ class TestHTCondorSiteAdapter(TestCase):
                     ),
                 )
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_DOES_NOT_EXISTS)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_Q_OUTPUT_DOES_NOT_EXISTS),
+        ]
+    )
     def test_resource_status_already_deleted(self):
         response = asyncio.run(
             self.adapter.resource_status(
@@ -386,7 +425,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
 
-    @mock_executor_run_command(stdout=CONDOR_SUSPEND_OUTPUT)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_SUSPEND_OUTPUT),
+        ]
+    )
     def test_stop_resource(self):
         response = asyncio.run(
             self.adapter.stop_resource(AttributeDict(remote_resource_uuid="1351043.0"))
@@ -394,14 +437,15 @@ class TestHTCondorSiteAdapter(TestCase):
         self.assertIsNone(response)
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_SUSPEND_FAILED_MESSAGE,
-            exit_code=1,
-            stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
-            stdout="",
-            stdin="",
-        ),
+        [
+            CommandExecutionFailure(
+                message=CONDOR_SUSPEND_FAILED_MESSAGE,
+                exit_code=1,
+                stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
+                stdout="",
+                stdin="",
+            ),
+        ]
     )
     def test_stop_resource_failed_redo_not_found(self):
         with self.assertRaises(TardisResourceStatusUpdateFailed):
@@ -412,14 +456,15 @@ class TestHTCondorSiteAdapter(TestCase):
             )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_SUSPEND_FAILED_MESSAGE,
-            exit_code=1,
-            stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_RUNNING,
-            stdout="",
-            stdin="",
-        ),
+        [
+            CommandExecutionFailure(
+                message=CONDOR_SUSPEND_FAILED_MESSAGE,
+                exit_code=1,
+                stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_RUNNING,
+                stdout="",
+                stdin="",
+            ),
+        ]
     )
     def test_stop_resource_failed_redo_not_running(self):
         with self.assertRaises(TardisResourceStatusUpdateFailed):
@@ -430,14 +475,15 @@ class TestHTCondorSiteAdapter(TestCase):
             )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_SUSPEND_FAILED_MESSAGE,
-            exit_code=2,
-            stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
-            stdout="",
-            stdin="",
-        ),
+        [
+            CommandExecutionFailure(
+                message=CONDOR_SUSPEND_FAILED_MESSAGE,
+                exit_code=2,
+                stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
+                stdout="",
+                stdin="",
+            ),
+        ]
     )
     def test_stop_resource_failed_raise(self):
         with self.assertRaises(CommandExecutionFailure):
@@ -447,7 +493,11 @@ class TestHTCondorSiteAdapter(TestCase):
                 ),
             )
 
-    @mock_executor_run_command(stdout=CONDOR_RM_OUTPUT)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_RM_OUTPUT),
+        ]
+    )
     def test_terminate_resource(self):
         response = asyncio.run(
             self.adapter.terminate_resource(
@@ -456,7 +506,11 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         self.assertIsNone(response)
 
-    @mock_executor_run_command(stdout=CONDOR_RM_FAILED_OUTPUT)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=CONDOR_RM_FAILED_OUTPUT),
+        ]
+    )
     def test_terminate_resource_failed_redo(self):
         with self.assertRaises(TardisResourceStatusUpdateFailed):
             asyncio.run(
@@ -466,14 +520,15 @@ class TestHTCondorSiteAdapter(TestCase):
             )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_RM_FAILED_MESSAGE,
-            exit_code=2,
-            stderr=CONDOR_RM_FAILED_OUTPUT,
-            stdout="",
-            stdin="",
-        ),
+        [
+            CommandExecutionFailure(
+                message=CONDOR_RM_FAILED_MESSAGE,
+                exit_code=2,
+                stderr=CONDOR_RM_FAILED_OUTPUT,
+                stdout="",
+                stdin="",
+            ),
+        ]
     )
     def test_terminate_resource_failed_raise(self):
         with self.assertRaises(CommandExecutionFailure):

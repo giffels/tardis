@@ -7,6 +7,7 @@ from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.utilities.attributedict import AttributeDict
 from tests.utilities.utilities import mock_executor_run_command
 
+
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -144,7 +145,13 @@ class TestSlurmAdapter(TestCase):
                 machine_type="test2large", site_name="TestSite"
             )
 
-    @mock_executor_run_command(TEST_DEPLOY_RESOURCE_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+        ]
+    )
     def test_deploy_resource(self):
         resource_attributes = AttributeDict(
             machine_type="test2large",
@@ -188,7 +195,11 @@ class TestSlurmAdapter(TestCase):
             "sbatch -p normal -N 1 -n 20 -t 60 --mem=2607mb --export=SLURM_Walltime=60,TardisDroneCores=20,TardisDroneMemory=2607,TardisDroneDisk=102400,TardisDroneUuid=testsite-1390065 pilot.sh"  # noqa: B950
         )
 
-    @mock_executor_run_command(TEST_DEPLOY_RESOURCE_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+        ]
+    )
     def test_deploy_resource_w_submit_options(self):
         self.test_site_config.MachineTypeConfiguration.test2large.SubmitOptions = (
             AttributeDict(long=AttributeDict(gres="tmp:1G"))
@@ -226,7 +237,11 @@ class TestSlurmAdapter(TestCase):
     def test_site_name(self):
         self.assertEqual(self.slurm_adapter.site_name, "TestSite")
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE),
+        ]
+    )
     def test_resource_status(self):
         self.assertDictEqual(
             AttributeDict(
@@ -243,7 +258,11 @@ class TestSlurmAdapter(TestCase):
             'squeue -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE),
+        ]
+    )
     def test_resource_status_w_options(self):
         self.test_site_config.MachineTypeConfiguration.test2large.StatusOptions = (
             AttributeDict(
@@ -269,7 +288,11 @@ class TestSlurmAdapter(TestCase):
             'squeue -p cm4_tiny --cluster=cm4 -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE_RUNNING)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING),
+        ]
+    )
     def test_update_resource_status(self):
         self.assertEqual(
             self.resource_attributes["resource_status"], ResourceStatus.Booting
@@ -290,7 +313,11 @@ class TestSlurmAdapter(TestCase):
             'squeue -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE_ALL_STATES)
+    @mock_executor_run_command(
+        # Return 24 times (the number of states in state_translations dictionary)
+        [AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_ALL_STATES)]
+        * 24
+    )
     def test_resource_state_translation(self):
         state_translations = {
             "BOOT_FAIL": ResourceStatus.Error,
@@ -336,7 +363,11 @@ class TestSlurmAdapter(TestCase):
 
             self.mock_executor.reset_mock()
 
-    @mock_executor_run_command("")
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=""),
+        ]
+    )
     def test_resource_status_of_completed_jobs_w_empty_reply(self):
         response = asyncio.run(
             self.slurm_adapter.resource_status(
@@ -354,13 +385,15 @@ class TestSlurmAdapter(TestCase):
         )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Run command squeue --job=1351043 via SSHExecutor failed",
-            stdout="",
-            stderr="slurm_load_jobs error: Invalid job id specified",
-            exit_code=1,
-        ),
+        [
+            AttributeDict(stdout=""),
+            CommandExecutionFailure(
+                message="Run command squeue --job=1351043 via SSHExecutor failed",
+                stdout="",
+                stderr="slurm_load_jobs error: Invalid job id specified",
+                exit_code=1,
+            ),
+        ]
     )
     def test_resource_status_of_completed_jobs_w_raised_exception(self):
         response = asyncio.run(
@@ -408,10 +441,11 @@ class TestSlurmAdapter(TestCase):
         )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-        ),
+        [
+            CommandExecutionFailure(
+                message="Failed", stdout="Failed", stderr="Failed", exit_code=2
+            ),
+        ]
     )
     def test_resource_status_update_failed(self):
         with self.assertLogs(level=logging.WARNING):
@@ -426,7 +460,11 @@ class TestSlurmAdapter(TestCase):
             'squeue -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(stdout="", stderr="", exit_code=0)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout="", stderr="", exit_code=0),
+        ]
+    )
     def test_stop_resource(self):
         asyncio.run(
             self.slurm_adapter.stop_resource(
@@ -438,7 +476,11 @@ class TestSlurmAdapter(TestCase):
             "scancel 1390065"
         )
 
-    @mock_executor_run_command(stdout="", stderr="", exit_code=0)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout="", stderr="", exit_code=0),
+        ]
+    )
     def test_terminate_resource(self):
         asyncio.run(
             self.slurm_adapter.terminate_resource(
@@ -450,7 +492,11 @@ class TestSlurmAdapter(TestCase):
             "scancel 1390065"
         )
 
-    @mock_executor_run_command(stdout="", stderr="", exit_code=0)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout="", stderr="", exit_code=0),
+        ]
+    )
     def test_terminate_resource_w_options(self):
         self.test_site_config.MachineTypeConfiguration.test2large.TerminateOptions = (
             AttributeDict(
