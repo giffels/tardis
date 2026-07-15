@@ -79,9 +79,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=SINFO_RETURN),
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in drain_machine
+            AttributeDict(return_value=0),  # scontrol call in drain_machine
         ]
-        * 2
     )
     def test_drain_machine(self):
         asyncio.run(self.slurm_adapter.drain_machine(drone_uuid="VM-1"))
@@ -98,7 +98,7 @@ class TestSlurmAdapter(TestCase):
         [
             CommandExecutionFailure(
                 message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-            ),
+            ),  # sinfo call in update_status
         ]
     )
     def test_update_exception(self):
@@ -109,9 +109,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=SINFO_RETURN),
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in drain_machine
+            AttributeDict(return_value=0),  # scontrol call in drain_machine
         ]
-        * 2
     )
     def test_drain_machine_without_options(self):
         self.setup_config_mock()
@@ -130,7 +130,7 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=SINFO_RETURN),
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
         ]
     )
     def test_get_resource_ratios(self):
@@ -152,7 +152,7 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=SINFO_RETURN),
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
         ]
     )
     def test_get_resource_ratios_without_options(self):
@@ -173,7 +173,7 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=SINFO_RETURN),
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
         ]
     )
     def test_get_allocation(self):
@@ -190,7 +190,10 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=SINFO_RETURN),
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_machine_status
+            CommandExecutionFailure(
+                message="Test", exit_code=123, stderr="Test", stdout="Test"
+            ),  # sinfo call in get_machine_status, 2nd call
         ]
     )
     def test_get_machine_status(self):
@@ -210,12 +213,6 @@ class TestSlurmAdapter(TestCase):
             )
 
         self.mock_executor.reset_mock()
-
-        self.mock_executor.return_value.run_command.side_effect = (
-            CommandExecutionFailure(
-                message="Test", exit_code=123, stderr="Test", stdout="Test"
-            )
-        )
 
         attributes = {
             "statelong": "statelong",
@@ -240,7 +237,7 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=SINFO_RETURN),
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
         ]
     )
     def test_get_utilisation(self):

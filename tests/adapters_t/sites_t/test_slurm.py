@@ -148,9 +148,8 @@ class TestSlurmAdapter(TestCase):
     @mock_executor_run_command(
         [
             AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
-            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
-            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
-        ]
+        ]  # sbatch call in deploy_resource, called 3 times in test
+        * 3
     )
     def test_deploy_resource(self):
         resource_attributes = AttributeDict(
@@ -197,7 +196,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+            AttributeDict(
+                stdout=TEST_DEPLOY_RESOURCE_RESPONSE
+            ),  # sbatch call in deploy_resource
         ]
     )
     def test_deploy_resource_w_submit_options(self):
@@ -239,7 +240,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE),
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE
+            ),  # squeue call in resource_status
         ]
     )
     def test_resource_status(self):
@@ -260,7 +263,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE),
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE
+            ),  # squeue call in resource_status
         ]
     )
     def test_resource_status_w_options(self):
@@ -290,7 +295,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING),
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING
+            ),  # squeue call in resource_status
         ]
     )
     def test_update_resource_status(self):
@@ -315,7 +322,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         # Return 24 times (the number of states in state_translations dictionary)
-        [AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_ALL_STATES)]
+        [
+            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_ALL_STATES)
+        ]  # squeue call in resource_status
         * 24
     )
     def test_resource_state_translation(self):
@@ -365,7 +374,7 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=""),
+            AttributeDict(stdout=""),  # squeue call in resource_status
         ]
     )
     def test_resource_status_of_completed_jobs_w_empty_reply(self):
@@ -386,13 +395,13 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=""),
+            AttributeDict(stdout=""),  # squeue call in resource_status
             CommandExecutionFailure(
                 message="Run command squeue --job=1351043 via SSHExecutor failed",
                 stdout="",
                 stderr="slurm_load_jobs error: Invalid job id specified",
                 exit_code=1,
-            ),
+            ),  # squeue call in resource_status (2nd call in test)
         ]
     )
     def test_resource_status_of_completed_jobs_w_raised_exception(self):
@@ -444,7 +453,7 @@ class TestSlurmAdapter(TestCase):
         [
             CommandExecutionFailure(
                 message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-            ),
+            ),  # squeue call in resource_status
         ]
     )
     def test_resource_status_update_failed(self):
@@ -462,7 +471,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout="", stderr="", exit_code=0),
+            AttributeDict(
+                stdout="", stderr="", exit_code=0
+            ),  # scancel call in stop_resource
         ]
     )
     def test_stop_resource(self):
@@ -478,7 +489,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout="", stderr="", exit_code=0),
+            AttributeDict(
+                stdout="", stderr="", exit_code=0
+            ),  # scancel call in terminate_resource
         ]
     )
     def test_terminate_resource(self):
@@ -494,7 +507,9 @@ class TestSlurmAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout="", stderr="", exit_code=0),
+            AttributeDict(
+                stdout="", stderr="", exit_code=0
+            ),  # scancel call in terminate_resource
         ]
     )
     def test_terminate_resource_w_options(self):

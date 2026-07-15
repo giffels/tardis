@@ -161,7 +161,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_SUBMIT_OUTPUT),
+            AttributeDict(
+                stdout=CONDOR_SUBMIT_OUTPUT
+            ),  # condor_submit call in deploy_resource, 5 calls in this test
         ]
         * 5
     )
@@ -305,7 +307,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_IDLE),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_IDLE
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_idle(self):
@@ -318,7 +322,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_RUN),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_RUN
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_run(self):
@@ -331,7 +337,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_REMOVING),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_REMOVING
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_removing(self):
@@ -344,7 +352,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_COMPLETED),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_COMPLETED
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_completed(self):
@@ -357,7 +367,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_HELD),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_HELD
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_held(self):
@@ -370,7 +382,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_TRANSFERING_OUTPUT),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_TRANSFERING_OUTPUT
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_transfering_output(self):
@@ -383,7 +397,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_SUSPENDED),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_SUSPENDED
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_unexpanded(self):
@@ -398,7 +414,7 @@ class TestHTCondorSiteAdapter(TestCase):
         [
             CommandExecutionFailure(
                 message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-            ),
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_command_execution_error(self):
@@ -414,7 +430,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_Q_OUTPUT_DOES_NOT_EXISTS),
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_DOES_NOT_EXISTS
+            ),  # condor_q call in resource_status
         ]
     )
     def test_resource_status_already_deleted(self):
@@ -427,7 +445,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_SUSPEND_OUTPUT),
+            AttributeDict(
+                stdout=CONDOR_SUSPEND_OUTPUT
+            ),  # condor_suspend call in stop_resource
         ]
     )
     def test_stop_resource(self):
@@ -444,7 +464,7 @@ class TestHTCondorSiteAdapter(TestCase):
                 stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
                 stdout="",
                 stdin="",
-            ),
+            ),  # condor_suspend call in stop_resource
         ]
     )
     def test_stop_resource_failed_redo_not_found(self):
@@ -463,7 +483,7 @@ class TestHTCondorSiteAdapter(TestCase):
                 stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_RUNNING,
                 stdout="",
                 stdin="",
-            ),
+            ),  # condor_suspend call in stop_resource
         ]
     )
     def test_stop_resource_failed_redo_not_running(self):
@@ -482,7 +502,7 @@ class TestHTCondorSiteAdapter(TestCase):
                 stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
                 stdout="",
                 stdin="",
-            ),
+            ),  # condor_suspend call in stop_resource
         ]
     )
     def test_stop_resource_failed_raise(self):
@@ -495,7 +515,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_RM_OUTPUT),
+            AttributeDict(
+                stdout=CONDOR_RM_OUTPUT
+            ),  # condor_rm call in terminate_resource
         ]
     )
     def test_terminate_resource(self):
@@ -508,7 +530,9 @@ class TestHTCondorSiteAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=CONDOR_RM_FAILED_OUTPUT),
+            AttributeDict(
+                stdout=CONDOR_RM_FAILED_OUTPUT
+            ),  # condor_rm call in terminate_resource
         ]
     )
     def test_terminate_resource_failed_redo(self):
@@ -527,7 +551,7 @@ class TestHTCondorSiteAdapter(TestCase):
                 stderr=CONDOR_RM_FAILED_OUTPUT,
                 stdout="",
                 stdin="",
-            ),
+            ),  # condor_rm call in terminate_resource
         ]
     )
     def test_terminate_resource_failed_raise(self):

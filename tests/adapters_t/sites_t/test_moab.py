@@ -222,7 +222,9 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+            AttributeDict(
+                stdout=TEST_DEPLOY_RESOURCE_RESPONSE
+            ),  # msub call in deploy_resource
         ]
     )
     def test_deploy_resource(self):
@@ -243,7 +245,9 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+            AttributeDict(
+                stdout=TEST_DEPLOY_RESOURCE_RESPONSE
+            ),  # msub call in deploy_resource_w_submit_options
         ]
     )
     def test_deploy_resource_w_submit_options(self):
@@ -277,9 +281,11 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE),
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE),
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE
+            ),  # showq call in resource_status, called twice in resource_status
         ]
+        * 2
     )
     def test_resource_status(self):
         self.assertDictEqual(
@@ -295,8 +301,12 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         # Multiplies the single-item list by the exact number of expected calls
-        [AttributeDict(stdout=TEST_RESOURCE_STATE_TRANSLATION_RESPONSE)]
-        * (2 * len(STATE_TRANSLATIONS))
+        [
+            AttributeDict(stdout=TEST_RESOURCE_STATE_TRANSLATION_RESPONSE)
+        ]  # showq call in resource_status, called twice per resource_status call
+        * (
+            2 * len(STATE_TRANSLATIONS)
+        )  # called len(STATE_TRANSLATIONS) times in this test
     )
     def test_resource_state_translation(self):
         self.mock_executor.reset_mock()
@@ -319,9 +329,11 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING),
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING),
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING
+            ),  # showq call in resource_status, called twice in resource_status
         ]
+        * 2
     )
     def test_resource_status_update(self):
         self.assertEqual(
@@ -341,7 +353,9 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_TERMINATE_RESOURCE_RESPONSE),
+            AttributeDict(
+                stdout=TEST_TERMINATE_RESOURCE_RESPONSE
+            ),  # canceljob call in stop_resource
         ]
     )
     def test_stop_resource(self):
@@ -356,7 +370,9 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_TERMINATE_RESOURCE_RESPONSE),
+            AttributeDict(
+                stdout=TEST_TERMINATE_RESOURCE_RESPONSE
+            ),  # canceljob call in terminate_resource
         ]
     )
     def test_terminate_resource(self):
@@ -376,7 +392,7 @@ class TestMoabAdapter(TestCase):
                 exit_code=1,
                 stderr=TEST_TERMINATE_DEAD_RESOURCE_RESPONSE,
                 stdout="",
-            ),
+            ),  # canceljob call in terminate_resource
         ]
     )
     def test_terminate_dead_resource(self):
@@ -389,7 +405,9 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            CommandExecutionFailure(message="Test", stdout="", stderr="", exit_code=2),
+            CommandExecutionFailure(
+                message="Test", stdout="", stderr="", exit_code=2
+            ),  # canceljob call in terminate_resource
         ]
     )
     def test_terminate_resource_error(self):
@@ -404,7 +422,7 @@ class TestMoabAdapter(TestCase):
         [
             CommandExecutionFailure(
                 message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-            ),
+            ),  # showq call in resource_status
         ]
     )
     def test_resource_status_update_failed(self):
@@ -421,9 +439,11 @@ class TestMoabAdapter(TestCase):
 
     @mock_executor_run_command(
         [
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING),
-            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING),
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING
+            ),  # showq call in resource_status
         ]
+        * 2
     )
     def test_resource_status_of_completed_jobs(self):
         response = asyncio.run(
