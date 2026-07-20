@@ -257,3 +257,43 @@ class TestAsyncBulkCall(TestCase):
 
         # Clean up the initial tracking future
         await task1_future
+
+
+class TestLoopSynchronizationFactory(TestCase):
+    def test_create_inside_event_loop(self):
+        """
+        Verifies that create() successfully initializes LoopSynchronization
+        when an event loop is running.
+        """
+
+        async def run_test():
+            concurrency_limit = 5
+
+            # Call the factory method inside the running loop context
+            instance = LoopSynchronization.create(concurrency_limit)
+
+            # Assert correct types are initialized
+            self.assertIsInstance(instance, LoopSynchronization)
+            self.assertIsInstance(instance.queue, asyncio.Queue)
+            self.assertIsInstance(instance.semaphore, asyncio.BoundedSemaphore)
+
+            # Verify the semaphore's internal value matches our concurrency parameter
+            # Note: _value is an implementation detail of asyncio.BoundedSemaphore
+            self.assertEqual(instance.semaphore._value, concurrency_limit)
+
+        # asyncio.run handles setting up and tearing down a fresh event loop
+        asyncio.run(run_test())
+
+    def test_create_outside_event_loop_raises_error(self):
+        """
+        Verifies that create() raises a RuntimeError with the expected
+        explanatory message when called outside an active event loop.
+        """
+        # Ensure no event loop is running during this call
+        with self.assertRaises(RuntimeError) as context:
+            LoopSynchronization.create(concurrency=3)
+
+        self.assertIn(
+            "LoopSynchronization must be initialized within a running event loop.",
+            str(context.exception),
+        )
