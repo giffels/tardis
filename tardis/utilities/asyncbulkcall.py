@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import TypeVar, Generic, Iterable, List, Tuple, Optional, Set
 from typing_extensions import Protocol, Self
+from weakref import WeakKeyDictionary
 import asyncio
 import time
 import sys
@@ -101,36 +102,19 @@ class AsyncBulkCall(Generic[T, R]):
         self._delay = delay
         self._concurrency = sys.maxsize if concurrent is None else concurrent
         # task handling dispatch from queue to command execution
-        self._dispatch_task: Optional[asyncio.Task] = None
+        self._dispatch_tasks: WeakKeyDictionary[
+            asyncio.AbstractEventLoop, asyncio.Task
+        ] = WeakKeyDictionary()
         # tasks handling individual command executions
         self._bulk_tasks: Set[asyncio.Task] = set()
 
         # Track active event loop states to safely handle multi-loop runs
-        # (like unittests)
-        self._current_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._loop_synchronization = LoopSynchronization(queue=None, semaphore=None)
+        # like unittests or free-threading
+        self._loop_synchronization: WeakKeyDictionary[
+            asyncio.AbstractEventLoop, LoopSynchronization
+        ] = WeakKeyDictionary()
 
         self._verify_settings()
-
-    def _get_loop_synchronization(self) -> LoopSynchronization:
-        """Dynamically ensures resources match the currently running event loop."""
-        current_loop = asyncio.get_running_loop()
-        if self._current_loop != current_loop:
-            self._current_loop = current_loop
-            self._loop_synchronization = LoopSynchronization.create(
-                concurrency=self._concurrency
-            )
-        return self._loop_synchronization
-
-    @property
-    def _concurrent(self) -> "asyncio.BoundedSemaphore":
-        """synchronized counter for active commands"""
-        return self._get_loop_synchronization().semaphore
-
-    @property
-    def _queue(self) -> "asyncio.Queue[Tuple[T, asyncio.Future[R]]]":
-        """queue of outstanding tasks"""
-        return self._get_loop_synchronization().queue
 
     def _verify_settings(self):
         if not isinstance(self._size, int) or self._size <= 0:
@@ -145,27 +129,41 @@ class AsyncBulkCall(Generic[T, R]):
 
     async def __call__(self, __task: T) -> R:
         """Queue a ``task`` for bulk execution and return the result when available"""
-        result: "asyncio.Future[R]" = asyncio.get_running_loop().create_future()
+        current_loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        if current_loop not in self._loop_synchronization:
+            self._loop_synchronization[current_loop] = LoopSynchronization.create(
+                self._concurrency
+            )
+        synchronized_resources = self._loop_synchronization[current_loop]
+        result: "asyncio.Future[R]" = current_loop.create_future()
+
         # queue item first so that the dispatch task does not finish before
-        self._queue.put_nowait((__task, result))
+        synchronized_resources.queue.put_nowait((__task, result))
         # ensure there is a worker to dispatch items for command execution
-        if self._dispatch_task is None or self._dispatch_task.done():
-            self._dispatch_task = asyncio.ensure_future(self._bulk_dispatch())
+        worker = self._dispatch_tasks.get(current_loop)
+        if worker is None or worker.done():
+            self._dispatch_tasks[current_loop] = asyncio.ensure_future(
+                self._bulk_dispatch(current_loop)
+            )
         return await result
 
-    async def _bulk_dispatch(self):
+    async def _bulk_dispatch(self, current_loop: asyncio.AbstractEventLoop) -> None:
         """Collect tasks into bulks and dispatch them for command execution"""
-        while not self._queue.empty():
-            bulk = list(zip(*(await self._get_bulk())))  # noqa B905
+        synchronized_resources = self._loop_synchronization[current_loop]
+        queue = synchronized_resources.queue
+        semaphore = synchronized_resources.semaphore
+
+        while not queue.empty():
+            bulk = list(zip(*(await self._get_bulk(queue))))  # noqa B905
             if not bulk:
                 continue
             tasks, futures = bulk
             # limit concurrent bulk execution
             # We must make sure *here* that a new bulk can be launched, but
             # we must release the claim *in the task* when it is done.
-            await self._concurrent.acquire()
+            await semaphore.acquire()
             task = asyncio.ensure_future(self._bulk_execute(tuple(tasks), futures))
-            task.add_done_callback(lambda _, sem=self._concurrent: sem.release())
+            task.add_done_callback(lambda _: semaphore.release())
             # track tasks via strong references to avoid them being garbage collected.
             # see bpo#44665
             self._bulk_tasks.add(task)
@@ -173,11 +171,13 @@ class AsyncBulkCall(Generic[T, R]):
             # yield to the event loop so that the `while True` loop does not arbitrarily
             # delay other tasks on the fast paths for `_get_bulk` and `acquire`.
             await asyncio.sleep(0)
-        self._dispatch_task = None
+        del self._dispatch_tasks[current_loop]
 
-    async def _get_bulk(self) -> "List[Tuple[T, asyncio.Future[R]]]":
+    async def _get_bulk(
+        self, queue: asyncio.Queue
+    ) -> "List[Tuple[T, asyncio.Future[R]]]":
         """Fetch the next bulk from the internal queue"""
-        max_items, queue = self._size, self._queue
+        max_items = self._size
         # always pull in at least one item asynchronously
         # this avoids stalling for very low delays and efficiently waits for items
         results = [await queue.get()]

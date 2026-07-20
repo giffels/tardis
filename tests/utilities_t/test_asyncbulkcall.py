@@ -4,7 +4,7 @@ import sys
 from platform import python_implementation
 from unittest import TestCase
 
-from tardis.utilities.asyncbulkcall import AsyncBulkCall
+from tardis.utilities.asyncbulkcall import AsyncBulkCall, LoopSynchronization
 
 
 class CallCounter:
@@ -67,13 +67,16 @@ class TestAsyncBulkCall(TestCase):
         bunch_size = 4
         # use large delay to only trigger on size
         execution = AsyncBulkCall(CallCounter(), size=bunch_size // 2, delay=256)
+        current_loop = asyncio.get_running_loop()
         for repeat in range(6):
             result = await self.execute(execution, bunch_size)
             self.assertEqual(
                 result, [(i, i // 2 + repeat * 2) for i in range(bunch_size)]
             )
             await asyncio.sleep(0.01)  # pause to allow for cleanup
-            assert execution._dispatch_task is None
+
+            # Update: Check that the loop key has been removed from the weak dict
+            self.assertNotIn(current_loop, execution._dispatch_tasks)
 
     def test_sanity_checks(self):
         """Test against illegal settings"""
@@ -102,17 +105,28 @@ class TestAsyncBulkCall(TestCase):
         """
         execution = AsyncBulkCall(CallCounter(), size=100, delay=0.01)
 
+        abandoned_loop = None
+
         async def start_and_abandon():
-            loop = asyncio.get_running_loop()
-            fake_future = loop.create_future()
-            # This triggers initialization of self._loop_resources on the first loop
-            execution._queue.put_nowait((999, fake_future))
+            nonlocal abandoned_loop
+            abandoned_loop = asyncio.get_running_loop()
+            fake_future = abandoned_loop.create_future()
+
+            # Dynamically initialize the loop synchronization reference just like __call__ does
+            if abandoned_loop not in execution._loop_synchronization:
+                execution._loop_synchronization[abandoned_loop] = (
+                    LoopSynchronization.create(execution._concurrency)
+                )
+
+            execution._loop_synchronization[abandoned_loop].queue.put_nowait(
+                (999, fake_future)
+            )
 
         asyncio.run(start_and_abandon())
 
-        # Verify that the item is sitting stale inside the loop resources queue
-        self.assertIsNotNone(execution._loop_synchronization)
-        self.assertFalse(execution._loop_synchronization.queue.empty())
+        # Verify that the item is sitting stale inside the specific old loop's queue
+        self.assertIn(abandoned_loop, execution._loop_synchronization)
+        self.assertFalse(execution._loop_synchronization[abandoned_loop].queue.empty())
 
         # Move to a new event loop execution block
         async def verify_clean_slate():
