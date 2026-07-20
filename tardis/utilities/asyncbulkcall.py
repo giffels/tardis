@@ -61,7 +61,7 @@ class AsyncBulkCall(Generic[T, R]):
     :param command: async callable that executes several tasks
     :param size: maximum number of tasks to execute in one bulk
     :param delay: maximum time window for tasks to execute in one bulk
-    :param concurrent: how often the `command` may be executed at the same time
+    :param concurrent: how often the `command` may be executed at once per thread
 
     Given some bulk-task callable ``(T, ...) -> (R, ...)`` (the ``command``),
     :py:class:`~.BulkExecution` represents a single-task callable ``(T) -> R``.
@@ -140,8 +140,7 @@ class AsyncBulkCall(Generic[T, R]):
         # queue item first so that the dispatch task does not finish before
         synchronized_resources.queue.put_nowait((__task, result))
         # ensure there is a worker to dispatch items for command execution
-        worker = self._dispatch_tasks.get(current_loop)
-        if worker is None or worker.done():
+        if self._dispatch_tasks.get(current_loop) is None:
             self._dispatch_tasks[current_loop] = asyncio.ensure_future(
                 self._bulk_dispatch(current_loop)
             )

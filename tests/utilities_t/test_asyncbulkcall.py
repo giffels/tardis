@@ -255,7 +255,6 @@ class TestAsyncBulkCall(TestCase):
                 "Task 2 was stranded in the queue! The final guard failed to respawn the worker."  # noqa B950
             )
 
-        # Clean up the initial tracking future
         await task1_future
 
 
