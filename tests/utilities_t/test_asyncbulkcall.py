@@ -111,8 +111,8 @@ class TestAsyncBulkCall(TestCase):
         asyncio.run(start_and_abandon())
 
         # Verify that the item is sitting stale inside the loop resources queue
-        self.assertIsNotNone(execution._loop_resources)
-        self.assertFalse(execution._loop_resources.queue.empty())
+        self.assertIsNotNone(execution._loop_synchronization)
+        self.assertFalse(execution._loop_synchronization.queue.empty())
 
         # Move to a new event loop execution block
         async def verify_clean_slate():

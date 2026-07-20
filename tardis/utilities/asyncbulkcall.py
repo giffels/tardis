@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import TypeVar, Generic, Iterable, List, Tuple, Optional, Set
-from typing_extensions import Protocol
+from typing_extensions import Protocol, Self
 import asyncio
 import time
 import sys
@@ -10,7 +10,7 @@ R = TypeVar("R")
 
 
 @dataclass
-class LoopBoundResources:
+class LoopSynchronization:
     """
     Container for asyncio primitives bound to a specific event loop lifecycle
 
@@ -20,11 +20,24 @@ class LoopBoundResources:
     together so they can be discarded and re-initialized as a single unit.
 
     :param queue: The active queue of outstanding tasks and their result futures
-    :param concurrent: The semaphore limiting concurrent executions of the bulk command
+    :param semaphore: The semaphore limiting concurrent executions of the bulk command
     """
 
     queue: Optional[asyncio.Queue]
-    concurrent: Optional[asyncio.BoundedSemaphore]
+    semaphore: Optional[asyncio.BoundedSemaphore]
+
+    @classmethod
+    def create(cls: "type[Self]", concurrency: int) -> "LoopSynchronization":
+        """
+        Factory method. Must be called within a running event loop context
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError as e:
+            raise RuntimeError(
+                "LoopSynchronization must be initialized within a running event loop."
+            ) from e
+        return cls(asyncio.Queue(), asyncio.BoundedSemaphore(value=concurrency))
 
 
 class BulkCommand(Protocol[T, R]):
@@ -95,30 +108,29 @@ class AsyncBulkCall(Generic[T, R]):
         # Track active event loop states to safely handle multi-loop runs
         # (like unittests)
         self._current_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._loop_resources = LoopBoundResources(queue=None, concurrent=None)
+        self._loop_synchronization = LoopSynchronization(queue=None, semaphore=None)
 
         self._verify_settings()
 
-    def _get_loop_resources(self) -> LoopBoundResources:
+    def _get_loop_synchronization(self) -> LoopSynchronization:
         """Dynamically ensures resources match the currently running event loop."""
         current_loop = asyncio.get_running_loop()
         if self._current_loop != current_loop:
             self._current_loop = current_loop
-            self._loop_resources = LoopBoundResources(
-                queue=asyncio.Queue(),
-                concurrent=asyncio.BoundedSemaphore(value=self._concurrency),
+            self._loop_synchronization = LoopSynchronization.create(
+                concurrency=self._concurrency
             )
-        return self._loop_resources
+        return self._loop_synchronization
 
     @property
     def _concurrent(self) -> "asyncio.BoundedSemaphore":
         """synchronized counter for active commands"""
-        return self._get_loop_resources().concurrent
+        return self._get_loop_synchronization().semaphore
 
     @property
     def _queue(self) -> "asyncio.Queue[Tuple[T, asyncio.Future[R]]]":
         """queue of outstanding tasks"""
-        return self._get_loop_resources().queue
+        return self._get_loop_synchronization().queue
 
     def _verify_settings(self):
         if not isinstance(self._size, int) or self._size <= 0:
