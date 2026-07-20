@@ -152,26 +152,41 @@ class AsyncBulkCall(Generic[T, R]):
         synchronized_resources = self._loop_synchronization[current_loop]
         queue = synchronized_resources.queue
         semaphore = synchronized_resources.semaphore
-
-        while not queue.empty():
-            bulk = list(zip(*(await self._get_bulk(queue))))  # noqa B905
-            if not bulk:
-                continue
-            tasks, futures = bulk
-            # limit concurrent bulk execution
-            # We must make sure *here* that a new bulk can be launched, but
-            # we must release the claim *in the task* when it is done.
-            await semaphore.acquire()
-            task = asyncio.ensure_future(self._bulk_execute(tuple(tasks), futures))
-            task.add_done_callback(lambda _: semaphore.release())
-            # track tasks via strong references to avoid them being garbage collected.
-            # see bpo#44665
-            self._bulk_tasks.add(task)
-            task.add_done_callback(lambda _, task=task: self._bulk_tasks.discard(task))
-            # yield to the event loop so that the `while True` loop does not arbitrarily
-            # delay other tasks on the fast paths for `_get_bulk` and `acquire`.
-            await asyncio.sleep(0)
-        del self._dispatch_tasks[current_loop]
+        try:
+            while not queue.empty():
+                bulk = list(zip(*(await self._get_bulk(queue))))  # noqa B905
+                if not bulk:
+                    continue
+                tasks, futures = bulk
+                # limit concurrent bulk execution
+                # We must make sure *here* that a new bulk can be launched, but
+                # we must release the claim *in the task* when it is done.
+                await semaphore.acquire()
+                task = asyncio.ensure_future(self._bulk_execute(tuple(tasks), futures))
+                task.add_done_callback(lambda _: semaphore.release())
+                # track tasks via strong references to avoid them being garbage collected. # noqa B950
+                # see bpo#44665
+                self._bulk_tasks.add(task)
+                task.add_done_callback(
+                    lambda _, task=task: self._bulk_tasks.discard(task)
+                )
+                # yield to the event loop so that the `while True` loop does not arbitrarily # noqa B950
+                # delay other tasks on the fast paths for `_get_bulk` and `acquire`.
+                await asyncio.sleep(0)
+        finally:
+            # Check if this worker is still the registered worker for this loop
+            if self._dispatch_tasks.get(current_loop) == asyncio.current_task(
+                current_loop
+            ):
+                self._dispatch_tasks.pop(current_loop, None)
+            # Final Guard: If an item arrived during the final sleep/teardown,
+            # spawn a new worker to ensure it does not get stranded.
+            if not queue.empty() and current_loop in self._loop_synchronization:
+                worker = self._dispatch_tasks.get(current_loop)
+                if worker is None or worker.done():
+                    self._dispatch_tasks[current_loop] = asyncio.ensure_future(
+                        self._bulk_dispatch(current_loop)
+                    )
 
     async def _get_bulk(
         self, queue: asyncio.Queue
@@ -201,7 +216,7 @@ class AsyncBulkCall(Generic[T, R]):
     async def _bulk_execute(
         self, tasks: Tuple[T, ...], futures: "List[asyncio.Future[R]]"
     ) -> None:
-        """Execute several ``tasks`` in bulk and set their ``futures``' result"""
+        """Execute several ``tasks`` in bulk and set their ``futures`` result"""
         try:
             results = await self._command(*tasks)
             # make sure we can cleanly match input to output

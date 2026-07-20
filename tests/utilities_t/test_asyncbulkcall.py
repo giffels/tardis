@@ -112,7 +112,8 @@ class TestAsyncBulkCall(TestCase):
             abandoned_loop = asyncio.get_running_loop()
             fake_future = abandoned_loop.create_future()
 
-            # Dynamically initialize the loop synchronization reference just like __call__ does
+            # Dynamically initialize the loop synchronization reference just
+            # like __call__ does
             if abandoned_loop not in execution._loop_synchronization:
                 execution._loop_synchronization[abandoned_loop] = (
                     LoopSynchronization.create(execution._concurrency)
@@ -188,3 +189,71 @@ class TestAsyncBulkCall(TestCase):
         # CallCounter is persistent on the execution instance, so calls are
         # incremented to 1
         self.assertEqual(result_2, [(i, 1) for i in range(5)])
+
+    def test_final_guard_handles_late_enqueues(self):
+        """
+        Verifies that the final guard in _bulk_dispatch successfully respawns
+        a worker if a new item is queued during the teardown phase.
+        """
+        asyncio.run(self.check_final_guard_handles_late_enqueues())
+
+    async def check_final_guard_handles_late_enqueues(self):
+        # Using size=1 means every call immediately satisfies a complete bulk
+        execution = AsyncBulkCall(CallCounter(), size=1, delay=0.01)
+        current_loop = asyncio.get_running_loop()
+
+        # Pre-initialize loop-bound synchronization resources so we can grab the
+        # queue reference
+        if current_loop not in execution._loop_synchronization:
+            execution._loop_synchronization[current_loop] = LoopSynchronization.create(
+                execution._concurrency
+            )
+        synchronized_resources = execution._loop_synchronization[current_loop]
+
+        # Kick off an initial call to wake up the worker loop
+        task1_future = asyncio.create_task(execution("task_1"))
+
+        # Yield control to let _bulk_dispatch spin up, process task_1,
+        # and sit on the `await asyncio.sleep(0)` right before it checks the
+        # while loop condition again.
+        await asyncio.sleep(0)
+
+        # Manually inject a second task directly into the queue.
+        # This bypasses execution()'s worker-spawn checks, perfectly mimicking
+        # the race condition where an item lands in the queue right as the
+        # worker is shutting down.
+        result_future = current_loop.create_future()
+        synchronized_resources.queue.put_nowait(("task_2", result_future))
+
+        # Trick the while loop!
+        # We mock empty() to return True once so the main loop thinks it's done
+        # and exits.
+        # Subsequent calls will use the real method so the final guard sees the item.
+        original_empty = synchronized_resources.queue.empty
+        empty_called = False
+
+        def mock_empty():
+            nonlocal empty_called
+            if not empty_called:
+                empty_called = True
+                return True  # Force the while loop to exit
+            return original_empty()
+
+        synchronized_resources.queue.empty = mock_empty
+
+        # Await the late-arriving future with a brief timeout.
+        # If the final guard works, it notices the queue isn't empty, revives
+        # the dispatch loop, and resolves.
+        # If the final guard is missing or broken, this hangs forever and hits
+        # the timeout.
+        try:
+            await asyncio.wait_for(result_future, timeout=0.2)
+            self.assertTrue(result_future.done())
+            self.assertEqual(result_future.result(), ("task_2", 1))
+        except asyncio.TimeoutError:
+            self.fail(
+                "Task 2 was stranded in the queue! The final guard failed to respawn the worker."  # noqa B950
+            )
+
+        # Clean up the initial tracking future
+        await task1_future
