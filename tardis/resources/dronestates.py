@@ -1,9 +1,8 @@
 from datetime import datetime
-import asyncio
-import logging
-
 from typing import TYPE_CHECKING
 from typing import Type
+import asyncio
+import logging
 
 from ..exceptions.tardisexceptions import TardisAuthError
 from ..exceptions.tardisexceptions import TardisDroneCrashed

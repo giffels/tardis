@@ -5,8 +5,7 @@ from tardis.agents.siteagent import SiteAgent
 from tardis.interfaces.plugin import Plugin
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.interfaces.state import State
-from tardis.resources.dronestates import AvailableState
-from .dronestates import DownState, RequestState
+from .dronestates import AvailableState, DownState, RequestState
 from ..plugins.sqliteregistry import SqliteRegistry
 from ..utilities.attributedict import AttributeDict
 from ..utilities.utils import load_states
