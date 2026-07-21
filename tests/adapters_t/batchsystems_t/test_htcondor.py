@@ -1,5 +1,4 @@
-from tests.utilities.utilities import run_async
-from tests.utilities.utilities import mock_executor_run_command_new
+from tests.utilities.utilities import mock_executor_run_command
 
 from tardis.adapters.batchsystems.htcondor import HTCondorAdapter
 from tardis.adapters.batchsystems.htcondor import (
@@ -12,12 +11,12 @@ from tardis.exceptions.executorexceptions import CommandExecutionFailure
 from tardis.utilities.attributedict import AttributeDict
 
 from datetime import datetime
-from functools import partial
 from shlex import quote
 from types import MappingProxyType
 from unittest.mock import patch
 from unittest import TestCase
 
+import asyncio
 import logging
 
 NOW = int(datetime.now().timestamp())
@@ -207,10 +206,10 @@ class TestHTCondorAdapter(TestCase):
 
     def test_disintegrate_machine(self):
         self.assertIsNone(
-            run_async(self.htcondor_adapter.disintegrate_machine, drone_uuid="test")
+            asyncio.run(self.htcondor_adapter.disintegrate_machine(drone_uuid="test"))
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -242,14 +241,14 @@ class TestHTCondorAdapter(TestCase):
         ]
     )
     def test_drain_machine(self):
-        run_async(self.htcondor_adapter.drain_machine, drone_uuid="test")
+        asyncio.run(self.htcondor_adapter.drain_machine(drone_uuid="test"))
         self.mock_executor.return_value.run_command.assert_called_with(
             "condor_drain -pool my-htcondor.local -test -graceful slot1@test"
         )
 
         self.mock_executor.reset_mock()
 
-        run_async(self.htcondor_adapter.drain_machine, drone_uuid="test_uuid")
+        asyncio.run(self.htcondor_adapter.drain_machine(drone_uuid="test_uuid"))
         self.mock_executor.return_value.run_command.assert_called_with(
             "condor_drain -pool my-htcondor.local -test -graceful slot1@test_uuid@test"
         )
@@ -257,7 +256,7 @@ class TestHTCondorAdapter(TestCase):
         self.mock_executor.reset_mock()
 
         self.assertIsNone(  # should not run self._executor.run_command(cmd)
-            run_async(self.htcondor_adapter.drain_machine, drone_uuid="not_exists")
+            asyncio.run(self.htcondor_adapter.drain_machine(drone_uuid="not_exists"))
         )
         self.mock_executor.return_value.run_command.assert_not_called()
 
@@ -265,7 +264,7 @@ class TestHTCondorAdapter(TestCase):
 
         with self.assertLogs(level=logging.WARNING):
             self.assertIsNone(
-                run_async(self.htcondor_adapter.drain_machine, drone_uuid="test")
+                asyncio.run(self.htcondor_adapter.drain_machine(drone_uuid="test"))
             )
 
         self.mock_executor.reset_mock()
@@ -273,10 +272,10 @@ class TestHTCondorAdapter(TestCase):
         with self.assertRaises(CommandExecutionFailure):
             with self.assertLogs(level=logging.CRITICAL):
                 self.assertIsNone(
-                    run_async(self.htcondor_adapter.drain_machine, drone_uuid="test")
+                    asyncio.run(self.htcondor_adapter.drain_machine(drone_uuid="test"))
                 )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -299,24 +298,24 @@ class TestHTCondorAdapter(TestCase):
         self.setup_config_mock()
         self.htcondor_adapter = HTCondorAdapter()
 
-        run_async(self.htcondor_adapter.drain_machine, drone_uuid="test")
+        asyncio.run(self.htcondor_adapter.drain_machine(drone_uuid="test"))
         self.mock_executor.return_value.run_command.assert_called_with(
             "condor_drain -graceful slot1@test"
         )
 
         self.mock_executor.reset_mock()
 
-        run_async(self.htcondor_adapter.drain_machine, drone_uuid="test_uuid")
+        asyncio.run(self.htcondor_adapter.drain_machine(drone_uuid="test_uuid"))
         self.mock_executor.return_value.run_command.assert_called_with(
             "condor_drain -graceful slot1@test_uuid@test"
         )
 
     def test_integrate_machine(self):
         self.assertIsNone(
-            run_async(self.htcondor_adapter.integrate_machine, drone_uuid="test")
+            asyncio.run(self.htcondor_adapter.integrate_machine(drone_uuid="test"))
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -332,7 +331,9 @@ class TestHTCondorAdapter(TestCase):
     def test_get_resource_ratios(self):
         self.assertCountEqual(
             list(
-                run_async(self.htcondor_adapter.get_resource_ratios, drone_uuid="test")
+                asyncio.run(
+                    self.htcondor_adapter.get_resource_ratios(drone_uuid="test")
+                )
             ),
             [self.cpu_ratio, self.memory_ratio],
         )
@@ -340,8 +341,8 @@ class TestHTCondorAdapter(TestCase):
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(
-                self.htcondor_adapter.get_resource_ratios, drone_uuid="not_exists"
+            asyncio.run(
+                self.htcondor_adapter.get_resource_ratios(drone_uuid="not_exists")
             ),
             [],
         )
@@ -349,8 +350,8 @@ class TestHTCondorAdapter(TestCase):
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(
-                self.htcondor_adapter.get_resource_ratios, drone_uuid="test_undefined"
+            asyncio.run(
+                self.htcondor_adapter.get_resource_ratios(drone_uuid="test_undefined")
             ),
             [],
         )
@@ -358,13 +359,13 @@ class TestHTCondorAdapter(TestCase):
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(
-                self.htcondor_adapter.get_resource_ratios, drone_uuid="test_error"
+            asyncio.run(
+                self.htcondor_adapter.get_resource_ratios(drone_uuid="test_error")
             ),
             [],
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -384,7 +385,9 @@ class TestHTCondorAdapter(TestCase):
 
         self.assertCountEqual(
             list(
-                run_async(self.htcondor_adapter.get_resource_ratios, drone_uuid="test")
+                asyncio.run(
+                    self.htcondor_adapter.get_resource_ratios(drone_uuid="test")
+                )
             ),
             [self.cpu_ratio, self.memory_ratio],
         )
@@ -393,7 +396,7 @@ class TestHTCondorAdapter(TestCase):
             self.command_wo_options
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -408,12 +411,12 @@ class TestHTCondorAdapter(TestCase):
     )
     def test_get_allocation(self):
         self.assertEqual(
-            run_async(self.htcondor_adapter.get_allocation, drone_uuid="test"),
+            asyncio.run(self.htcondor_adapter.get_allocation(drone_uuid="test")),
             max([self.cpu_ratio, self.memory_ratio]),
         )
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -428,50 +431,52 @@ class TestHTCondorAdapter(TestCase):
     )
     def test_get_machine_status(self):
         self.assertEqual(
-            run_async(self.htcondor_adapter.get_machine_status, drone_uuid="test"),
+            asyncio.run(self.htcondor_adapter.get_machine_status(drone_uuid="test")),
             MachineStatus.Available,
         )
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(
-                self.htcondor_adapter.get_machine_status, drone_uuid="not_exists"
+            asyncio.run(
+                self.htcondor_adapter.get_machine_status(drone_uuid="not_exists")
             ),
             MachineStatus.NotAvailable,
         )
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(
-                self.htcondor_adapter.get_machine_status, drone_uuid="test_drain"
+            asyncio.run(
+                self.htcondor_adapter.get_machine_status(drone_uuid="test_drain")
             ),
             MachineStatus.Draining,
         )
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(
-                self.htcondor_adapter.get_machine_status, drone_uuid="test_drained"
+            asyncio.run(
+                self.htcondor_adapter.get_machine_status(drone_uuid="test_drained")
             ),
             MachineStatus.Drained,
         )
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(
-                self.htcondor_adapter.get_machine_status, drone_uuid="test_owner"
+            asyncio.run(
+                self.htcondor_adapter.get_machine_status(drone_uuid="test_owner")
             ),
             MachineStatus.NotAvailable,
         )
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(self.htcondor_adapter.get_machine_status, drone_uuid="test_uuid"),
+            asyncio.run(
+                self.htcondor_adapter.get_machine_status(drone_uuid="test_uuid")
+            ),
             MachineStatus.Available,
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -501,9 +506,8 @@ class TestHTCondorAdapter(TestCase):
 
         self.assertDictEqual(
             CONDOR_STATUS_RETURN_DICT,
-            run_async(
-                partial(
-                    htcondor_status_updater,
+            asyncio.run(
+                htcondor_status_updater(
                     self.config.BatchSystem.options,
                     attributes,
                     self.mock_executor.return_value,
@@ -517,7 +521,7 @@ class TestHTCondorAdapter(TestCase):
 
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -549,9 +553,8 @@ class TestHTCondorAdapter(TestCase):
         # check that no resources have been deleted and cached data is used
         self.assertDictEqual(
             CONDOR_STATUS_RETURN_DICT,
-            run_async(
-                partial(
-                    htcondor_status_updater,
+            asyncio.run(
+                htcondor_status_updater(
                     self.config.BatchSystem.options,
                     attributes,
                     self.mock_executor.return_value,
@@ -562,7 +565,7 @@ class TestHTCondorAdapter(TestCase):
 
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -593,9 +596,8 @@ class TestHTCondorAdapter(TestCase):
         # check that no resources have been deleted and cached data is used
         self.assertDictEqual(
             CONDOR_STATUS_RETURN_DICT,
-            run_async(
-                partial(
-                    htcondor_status_updater,
+            asyncio.run(
+                htcondor_status_updater(
                     self.config.BatchSystem.options,
                     attributes,
                     self.mock_executor.return_value,
@@ -610,7 +612,7 @@ class TestHTCondorAdapter(TestCase):
             )  # should query the oldest collector using -pool
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -641,9 +643,8 @@ class TestHTCondorAdapter(TestCase):
 
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(
-                    partial(
-                        htcondor_status_updater,
+                asyncio.run(
+                    htcondor_status_updater(
                         self.config.BatchSystem.options,
                         attributes,
                         self.mock_executor.return_value,
@@ -652,7 +653,7 @@ class TestHTCondorAdapter(TestCase):
                 )
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -667,7 +668,7 @@ class TestHTCondorAdapter(TestCase):
     )
     def test_get_utilisation(self):
         self.assertEqual(
-            run_async(self.htcondor_adapter.get_utilisation, drone_uuid="test"),
+            asyncio.run(self.htcondor_adapter.get_utilisation(drone_uuid="test")),
             min([self.cpu_ratio, self.memory_ratio]),
         )
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
@@ -678,7 +679,7 @@ class TestHTCondorAdapter(TestCase):
             self.htcondor_adapter.machine_meta_data_translation_mapping,
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(  # for call in htcondor_get_collectors
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -689,7 +690,7 @@ class TestHTCondorAdapter(TestCase):
         options = self.config.BatchSystem.options
         executor = self.mock_executor.return_value
 
-        result = run_async(htcondor_get_collectors, options, executor)
+        result = asyncio.run(htcondor_get_collectors(options, executor))
 
         # Expected: split collector names by newline and strip empty lines
         expected = [
@@ -703,7 +704,7 @@ class TestHTCondorAdapter(TestCase):
             "condor_status -af:t Machine -pool my-htcondor.local -test -collector"
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(  # for htcondor_get_collectors
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -717,7 +718,7 @@ class TestHTCondorAdapter(TestCase):
         options = self.config.BatchSystem.options
         executor = self.mock_executor.return_value
 
-        result = run_async(htcondor_get_collectors, options, executor)
+        result = asyncio.run(htcondor_get_collectors(options, executor))
 
         expected = [
             "cloud-htcondor-rhel8.gridka.de",
@@ -729,7 +730,7 @@ class TestHTCondorAdapter(TestCase):
             "condor_status -af:t Machine -collector"
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             CommandExecutionFailure(  # simulate failure in htcondor_get_collectors
                 message="Collector not reachable",
@@ -745,9 +746,9 @@ class TestHTCondorAdapter(TestCase):
 
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(htcondor_get_collectors, options, executor)
+                asyncio.run(htcondor_get_collectors(options, executor))
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(  # call in htcondor_get_collectors
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -761,7 +762,7 @@ class TestHTCondorAdapter(TestCase):
         options = self.config.BatchSystem.options
         executor = self.mock_executor.return_value
 
-        result = run_async(htcondor_get_collector_start_dates, options, executor)
+        result = asyncio.run(htcondor_get_collector_start_dates(options, executor))
 
         # We expect only machines from CONDOR_COLLECTOR_STATUS_RETURN to be included
         expected_times = {
@@ -769,7 +770,6 @@ class TestHTCondorAdapter(TestCase):
             "cloud-htcondor.gridka.de": datetime.fromtimestamp(1753947411),
         }
         self.assertEqual(result, expected_times)
-        print(self.mock_executor.return_value.run_command.mock_calls)
         # Ensure both commands were called with proper formatting
         self.mock_executor.return_value.run_command.assert_any_call(
             "condor_status -af:t Machine -pool my-htcondor.local -test -collector"
@@ -778,7 +778,7 @@ class TestHTCondorAdapter(TestCase):
             'condor_status -af:t Machine DaemonStartTime -constraint \'Machine == "cloud-htcondor-rhel8.gridka.de" || Machine == "cloud-htcondor.gridka.de"\' -pool my-htcondor.local -test -master'  # noqa B950
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(  # call in htcondor_get_collectors
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -794,7 +794,7 @@ class TestHTCondorAdapter(TestCase):
         options = self.config.BatchSystem.options
         executor = self.mock_executor.return_value
 
-        result = run_async(htcondor_get_collector_start_dates, options, executor)
+        result = asyncio.run(htcondor_get_collector_start_dates(options, executor))
 
         expected_times = {
             "cloud-htcondor-rhel8.gridka.de": datetime.fromtimestamp(1753949919),
@@ -809,7 +809,7 @@ class TestHTCondorAdapter(TestCase):
             'condor_status -af:t Machine DaemonStartTime -constraint \'Machine == "cloud-htcondor-rhel8.gridka.de" || Machine == "cloud-htcondor.gridka.de"\' -master'  # noqa B950
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(  # call in htcondor_get_collectors
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -823,7 +823,7 @@ class TestHTCondorAdapter(TestCase):
         options = self.config.BatchSystem.options
         executor = self.mock_executor.return_value
 
-        result = run_async(htcondor_get_collector_start_dates, options, executor)
+        result = asyncio.run(htcondor_get_collector_start_dates(options, executor))
 
         # We expect only machines from CONDOR_COLLECTOR_STATUS_RETURN to be included
         datetime_now = datetime.fromtimestamp(NOW)
@@ -841,7 +841,7 @@ class TestHTCondorAdapter(TestCase):
             'condor_status -af:t Machine DaemonStartTime -constraint \'Machine == "cloud-htcondor-rhel8.gridka.de" || Machine == "cloud-htcondor.gridka.de"\' -pool my-htcondor.local -test -master'  # noqa B950
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(  # call in htcondor_get_collectors
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -855,7 +855,7 @@ class TestHTCondorAdapter(TestCase):
         options = self.config.BatchSystem.options
         executor = self.mock_executor.return_value
 
-        result = run_async(htcondor_get_collector_start_dates, options, executor)
+        result = asyncio.run(htcondor_get_collector_start_dates(options, executor))
 
         # We expect only machines from CONDOR_COLLECTOR_STATUS_RETURN to be included
         expected_times = {
@@ -872,7 +872,7 @@ class TestHTCondorAdapter(TestCase):
             'condor_status -af:t Machine DaemonStartTime -constraint \'Machine == "cloud-htcondor-rhel8.gridka.de" || Machine == "cloud-htcondor.gridka.de"\' -pool my-htcondor.local -test -master'  # noqa B950
         )
 
-    @mock_executor_run_command_new(
+    @mock_executor_run_command(
         [
             AttributeDict(  # call in htcondor_get_collectors
                 stdout=CONDOR_COLLECTOR_STATUS_RETURN, stderr="", exit_code=0
@@ -892,4 +892,4 @@ class TestHTCondorAdapter(TestCase):
 
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(htcondor_get_collector_start_dates, options, executor)
+                asyncio.run(htcondor_get_collector_start_dates(options, executor))

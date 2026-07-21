@@ -5,11 +5,12 @@ from tardis.exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.utilities.attributedict import AttributeDict
 from tests.utilities.utilities import mock_executor_run_command
-from tests.utilities.utilities import run_async
+
 
 from unittest import TestCase
 from unittest.mock import patch
 
+import asyncio
 import logging
 
 CONDOR_SUBMIT_OUTPUT = """Submitting job(s)
@@ -158,16 +159,24 @@ class TestHTCondorSiteAdapter(TestCase):
             ),
         )
 
-    @mock_executor_run_command(stdout=CONDOR_SUBMIT_OUTPUT)
-    def test_deploy_resource_htcondor_obs(self):
-        response = run_async(
-            self.adapter.deploy_resource,
+    @mock_executor_run_command(
+        [
             AttributeDict(
-                drone_uuid="test-123",
-                obs_machine_meta_data_translation_mapping=AttributeDict(
-                    Cores=1,
-                    Memory=1024,
-                    Disk=1024 * 1024,
+                stdout=CONDOR_SUBMIT_OUTPUT
+            ),  # condor_submit call in deploy_resource, 5 calls in this test
+        ]
+        * 5
+    )
+    def test_deploy_resource_htcondor_obs(self):
+        response = asyncio.run(
+            self.adapter.deploy_resource(
+                AttributeDict(
+                    drone_uuid="test-123",
+                    obs_machine_meta_data_translation_mapping=AttributeDict(
+                        Cores=1,
+                        Memory=1024,
+                        Disk=1024 * 1024,
+                    ),
                 ),
             ),
         )
@@ -178,16 +187,18 @@ class TestHTCondorSiteAdapter(TestCase):
             kwargs["stdin_input"],
             CONDOR_SUBMIT_JDL_CONDOR_OBS,
         )
+
         self.mock_executor.reset()
 
-        run_async(
-            self.adapter.deploy_resource,
-            AttributeDict(
-                drone_uuid="test-123",
-                obs_machine_meta_data_translation_mapping=AttributeDict(
-                    Cores=1,
-                    Memory=1,
-                    Disk=1,
+        asyncio.run(
+            self.adapter.deploy_resource(
+                AttributeDict(
+                    drone_uuid="test-123",
+                    obs_machine_meta_data_translation_mapping=AttributeDict(
+                        Cores=1,
+                        Memory=1,
+                        Disk=1,
+                    ),
                 ),
             ),
         )
@@ -205,12 +216,13 @@ class TestHTCondorSiteAdapter(TestCase):
 
         # "queue 1" deprecation
         with self.assertWarns(FutureWarning):
-            run_async(
-                self.adapter.deploy_resource,
-                AttributeDict(
-                    drone_uuid="test-123",
-                    obs_machine_meta_data_translation_mapping=AttributeDict(
-                        Cores=1, Memory=1, Disk=1
+            asyncio.run(
+                self.adapter.deploy_resource(
+                    AttributeDict(
+                        drone_uuid="test-123",
+                        obs_machine_meta_data_translation_mapping=AttributeDict(
+                            Cores=1, Memory=1, Disk=1
+                        ),
                     ),
                 ),
             )
@@ -220,14 +232,15 @@ class TestHTCondorSiteAdapter(TestCase):
             machine_type="test2large_args", site_name="TestSite"
         )
 
-        run_async(
-            self.adapter.deploy_resource,
-            AttributeDict(
-                drone_uuid="test-123",
-                obs_machine_meta_data_translation_mapping=AttributeDict(
-                    Cores=1,
-                    Memory=1024,
-                    Disk=1024 * 1024,
+        asyncio.run(
+            self.adapter.deploy_resource(
+                AttributeDict(
+                    drone_uuid="test-123",
+                    obs_machine_meta_data_translation_mapping=AttributeDict(
+                        Cores=1,
+                        Memory=1024,
+                        Disk=1024 * 1024,
+                    ),
                 ),
             ),
         )
@@ -244,14 +257,15 @@ class TestHTCondorSiteAdapter(TestCase):
         )
 
         # Test support for submit options
-        run_async(
-            self.adapter.deploy_resource,
-            AttributeDict(
-                drone_uuid="test-123",
-                obs_machine_meta_data_translation_mapping=AttributeDict(
-                    Cores=1,
-                    Memory=1024,
-                    Disk=1024 * 1024,
+        asyncio.run(
+            self.adapter.deploy_resource(
+                AttributeDict(
+                    drone_uuid="test-123",
+                    obs_machine_meta_data_translation_mapping=AttributeDict(
+                        Cores=1,
+                        Memory=1024,
+                        Disk=1024 * 1024,
+                    ),
                 ),
             ),
         )
@@ -267,14 +281,15 @@ class TestHTCondorSiteAdapter(TestCase):
         )
         with self.assertLogs(logging.getLogger(), logging.ERROR):
             with self.assertRaises(KeyError):
-                run_async(
-                    self.adapter.deploy_resource,
-                    AttributeDict(
-                        drone_uuid="test-123",
-                        obs_machine_meta_data_translation_mapping=AttributeDict(
-                            Cores=1,
-                            Memory=1024,
-                            Disk=1024 * 1024,
+                asyncio.run(
+                    self.adapter.deploy_resource(
+                        AttributeDict(
+                            drone_uuid="test-123",
+                            obs_machine_meta_data_translation_mapping=AttributeDict(
+                                Cores=1,
+                                Memory=1024,
+                                Disk=1024 * 1024,
+                            ),
                         ),
                     ),
                 )
@@ -290,175 +305,261 @@ class TestHTCondorSiteAdapter(TestCase):
     def test_site_name(self):
         self.assertEqual(self.adapter.site_name, "TestSite")
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_IDLE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_IDLE
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_idle(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Booting)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_RUN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_RUN
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_run(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Running)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_REMOVING)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_REMOVING
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_removing(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Running)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_COMPLETED)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_COMPLETED
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_completed(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_HELD)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_HELD
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_held(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Error)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_TRANSFERING_OUTPUT)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_TRANSFERING_OUTPUT
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_transfering_output(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Running)
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_SUSPENDED)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_SUSPENDED
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_unexpanded(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Stopped)
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-        ),
+        [
+            CommandExecutionFailure(
+                message="Failed", stdout="Failed", stderr="Failed", exit_code=2
+            ),  # condor_q call in resource_status
+        ]
     )
     def test_resource_status_command_execution_error(self):
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(
-                    self.adapter.resource_status,
-                    AttributeDict(
-                        remote_resource_uuid="1351043.0",
+                asyncio.run(
+                    self.adapter.resource_status(
+                        AttributeDict(
+                            remote_resource_uuid="1351043.0",
+                        )
                     ),
                 )
 
-    @mock_executor_run_command(stdout=CONDOR_Q_OUTPUT_DOES_NOT_EXISTS)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_Q_OUTPUT_DOES_NOT_EXISTS
+            ),  # condor_q call in resource_status
+        ]
+    )
     def test_resource_status_already_deleted(self):
-        response = run_async(
-            self.adapter.resource_status,
-            AttributeDict(remote_resource_uuid="1351043.0"),
+        response = asyncio.run(
+            self.adapter.resource_status(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
         )
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
 
-    @mock_executor_run_command(stdout=CONDOR_SUSPEND_OUTPUT)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_SUSPEND_OUTPUT
+            ),  # condor_suspend call in stop_resource
+        ]
+    )
     def test_stop_resource(self):
-        response = run_async(
-            self.adapter.stop_resource, AttributeDict(remote_resource_uuid="1351043.0")
+        response = asyncio.run(
+            self.adapter.stop_resource(AttributeDict(remote_resource_uuid="1351043.0"))
         )
         self.assertIsNone(response)
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_SUSPEND_FAILED_MESSAGE,
-            exit_code=1,
-            stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
-            stdout="",
-            stdin="",
-        ),
+        [
+            CommandExecutionFailure(
+                message=CONDOR_SUSPEND_FAILED_MESSAGE,
+                exit_code=1,
+                stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
+                stdout="",
+                stdin="",
+            ),  # condor_suspend call in stop_resource
+        ]
     )
     def test_stop_resource_failed_redo_not_found(self):
         with self.assertRaises(TardisResourceStatusUpdateFailed):
-            run_async(
-                self.adapter.stop_resource,
-                AttributeDict(remote_resource_uuid="1351043.0"),
+            asyncio.run(
+                self.adapter.stop_resource(
+                    AttributeDict(remote_resource_uuid="1351043.0")
+                ),
             )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_SUSPEND_FAILED_MESSAGE,
-            exit_code=1,
-            stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_RUNNING,
-            stdout="",
-            stdin="",
-        ),
+        [
+            CommandExecutionFailure(
+                message=CONDOR_SUSPEND_FAILED_MESSAGE,
+                exit_code=1,
+                stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_RUNNING,
+                stdout="",
+                stdin="",
+            ),  # condor_suspend call in stop_resource
+        ]
     )
     def test_stop_resource_failed_redo_not_running(self):
         with self.assertRaises(TardisResourceStatusUpdateFailed):
-            run_async(
-                self.adapter.stop_resource,
-                AttributeDict(remote_resource_uuid="1351043.0"),
+            asyncio.run(
+                self.adapter.stop_resource(
+                    AttributeDict(remote_resource_uuid="1351043.0")
+                ),
             )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_SUSPEND_FAILED_MESSAGE,
-            exit_code=2,
-            stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
-            stdout="",
-            stdin="",
-        ),
+        [
+            CommandExecutionFailure(
+                message=CONDOR_SUSPEND_FAILED_MESSAGE,
+                exit_code=2,
+                stderr=CONDOR_SUSPEND_FAILED_OUTPUT_NOT_FOUND,
+                stdout="",
+                stdin="",
+            ),  # condor_suspend call in stop_resource
+        ]
     )
     def test_stop_resource_failed_raise(self):
         with self.assertRaises(CommandExecutionFailure):
-            run_async(
-                self.adapter.stop_resource,
-                AttributeDict(remote_resource_uuid="1351043.0"),
-            )
-
-    @mock_executor_run_command(stdout=CONDOR_RM_OUTPUT)
-    def test_terminate_resource(self):
-        response = run_async(
-            self.adapter.terminate_resource,
-            AttributeDict(remote_resource_uuid="1351043.0"),
-        )
-        self.assertIsNone(response)
-
-    @mock_executor_run_command(stdout=CONDOR_RM_FAILED_OUTPUT)
-    def test_terminate_resource_failed_redo(self):
-        with self.assertRaises(TardisResourceStatusUpdateFailed):
-            run_async(
-                self.adapter.terminate_resource,
-                AttributeDict(remote_resource_uuid="1351043.0"),
+            asyncio.run(
+                self.adapter.stop_resource(
+                    AttributeDict(remote_resource_uuid="1351043.0")
+                ),
             )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message=CONDOR_RM_FAILED_MESSAGE,
-            exit_code=2,
-            stderr=CONDOR_RM_FAILED_OUTPUT,
-            stdout="",
-            stdin="",
-        ),
+        [
+            AttributeDict(
+                stdout=CONDOR_RM_OUTPUT
+            ),  # condor_rm call in terminate_resource
+        ]
+    )
+    def test_terminate_resource(self):
+        response = asyncio.run(
+            self.adapter.terminate_resource(
+                AttributeDict(remote_resource_uuid="1351043.0")
+            ),
+        )
+        self.assertIsNone(response)
+
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=CONDOR_RM_FAILED_OUTPUT
+            ),  # condor_rm call in terminate_resource
+        ]
+    )
+    def test_terminate_resource_failed_redo(self):
+        with self.assertRaises(TardisResourceStatusUpdateFailed):
+            asyncio.run(
+                self.adapter.terminate_resource(
+                    AttributeDict(remote_resource_uuid="1351043.0")
+                ),
+            )
+
+    @mock_executor_run_command(
+        [
+            CommandExecutionFailure(
+                message=CONDOR_RM_FAILED_MESSAGE,
+                exit_code=2,
+                stderr=CONDOR_RM_FAILED_OUTPUT,
+                stdout="",
+                stdin="",
+            ),  # condor_rm call in terminate_resource
+        ]
     )
     def test_terminate_resource_failed_raise(self):
         with self.assertRaises(CommandExecutionFailure):
-            run_async(
-                self.adapter.terminate_resource,
-                AttributeDict(remote_resource_uuid="1351043.0"),
+            asyncio.run(
+                self.adapter.terminate_resource(
+                    AttributeDict(remote_resource_uuid="1351043.0")
+                ),
             )
 
     def test_exception_handling(self):

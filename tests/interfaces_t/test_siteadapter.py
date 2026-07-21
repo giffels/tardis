@@ -1,13 +1,12 @@
 from tardis.interfaces.siteadapter import SiteAdapter
 from tardis.utilities.attributedict import AttributeDict
 
-from tests.utilities.utilities import run_async
-
 from cobald.utility.primitives import infinity as inf
 from unittest import TestCase
 from unittest.mock import patch
 from pydantic.error_wrappers import ValidationError
 
+import asyncio
 import logging
 
 
@@ -47,7 +46,7 @@ class TestSiteAdapter(TestCase):
 
     def test_deploy_resource(self):
         with self.assertRaises(NotImplementedError):
-            run_async(self.site_adapter.deploy_resource, dict())
+            asyncio.run(self.site_adapter.deploy_resource(dict()))
 
     def test_drone_environment(self):
         self.site_adapter._machine_type = "TestMachineType"
@@ -205,7 +204,7 @@ class TestSiteAdapter(TestCase):
 
     def test_resource_status(self):
         with self.assertRaises(NotImplementedError):
-            run_async(self.site_adapter.resource_status, dict())
+            asyncio.run(self.site_adapter.resource_status(dict()))
 
     def test_site_configuration(self):
         self.assertEqual(
@@ -271,8 +270,8 @@ class TestSiteAdapter(TestCase):
 
     def test_stop_resource(self):
         with self.assertRaises(NotImplementedError):
-            run_async(self.site_adapter.stop_resource, dict())
+            asyncio.run(self.site_adapter.stop_resource(dict()))
 
     def test_terminate_resource(self):
         with self.assertRaises(NotImplementedError):
-            run_async(self.site_adapter.terminate_resource, dict())
+            asyncio.run(self.site_adapter.terminate_resource(dict()))

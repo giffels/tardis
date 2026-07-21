@@ -3,12 +3,11 @@ from tardis.exceptions.tardisexceptions import TardisError
 from kubernetes_asyncio.client.rest import ApiException as K8SApiException
 from tardis.utilities.attributedict import AttributeDict
 from tardis.interfaces.siteadapter import ResourceStatus
-from tests.utilities.utilities import async_return
-from tests.utilities.utilities import run_async
 
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
+import asyncio
 import logging
 from kubernetes_asyncio import client
 
@@ -94,7 +93,7 @@ class TestKubernetesStackAdapter(TestCase):
             metadata=client.V1ObjectMeta(name="testsite-089123", uid="123456"),
             spec=spec,
         )
-        kubernetes_api.create_namespaced_deployment.return_value = async_return(
+        kubernetes_api.create_namespaced_deployment = AsyncMock(
             return_value=self.create_return_value
         )
         condition_list = [
@@ -108,20 +107,16 @@ class TestKubernetesStackAdapter(TestCase):
             spec=spec,
             status=client.V1DeploymentStatus(conditions=condition_list),
         )
-        kubernetes_api.read_namespaced_deployment.return_value = async_return(
+        kubernetes_api.read_namespaced_deployment = AsyncMock(
             return_value=self.read_return_value
         )
-        kubernetes_api.replace_namespaced_deployment.return_value = async_return(
+        kubernetes_api.replace_namespaced_deployment = AsyncMock(return_value=None)
+        kubernetes_api.delete_namespaced_deployment = AsyncMock(return_value=None)
+        kubernetes_hpa.create_namespaced_horizontal_pod_autoscaler = AsyncMock(
             return_value=None
         )
-        kubernetes_api.delete_namespaced_deployment.return_value = async_return(
+        kubernetes_hpa.delete_namespaced_horizontal_pod_autoscaler = AsyncMock(
             return_value=None
-        )
-        kubernetes_hpa.create_namespaced_horizontal_pod_autoscaler.return_value = (
-            async_return(return_value=None)
-        )
-        kubernetes_hpa.delete_namespaced_horizontal_pod_autoscaler.return_value = (
-            async_return(return_value=None)
         )
         self.kubernetes_adapter = KubernetesAdapter(
             machine_type="test2large", site_name="TestSite"
@@ -135,7 +130,7 @@ class TestKubernetesStackAdapter(TestCase):
         kubernetes_api = self.mock_kubernetes_api.return_value
         self.read_return_value.spec.replicas = replicas
         self.read_return_value.status.available_replicas = available_replicas
-        kubernetes_api.read_namespaced_deployment.return_value = async_return(
+        kubernetes_api.read_namespaced_deployment = AsyncMock(
             return_value=self.read_return_value
         )
 
@@ -155,15 +150,16 @@ class TestKubernetesStackAdapter(TestCase):
     @patch("kubernetes_asyncio.client.rest.aiohttp")
     def test_deploy_resource(self, mocked_aiohttp):
         self.assertEqual(
-            run_async(
-                self.kubernetes_adapter.deploy_resource,
-                resource_attributes=AttributeDict(
-                    drone_uuid="testsite-089123",
-                    remote_resource_uuid="123456",
-                    obs_machine_meta_data_translation_mapping=AttributeDict(
-                        Cores=1, Memory=1024, Disk=1024 * 1024
+            asyncio.run(
+                self.kubernetes_adapter.deploy_resource(
+                    resource_attributes=AttributeDict(
+                        drone_uuid="testsite-089123",
+                        remote_resource_uuid="123456",
+                        obs_machine_meta_data_translation_mapping=AttributeDict(
+                            Cores=1, Memory=1024, Disk=1024 * 1024
+                        ),
                     ),
-                ),
+                )
             ),
             AttributeDict(
                 remote_resource_uuid="123456",
@@ -190,11 +186,12 @@ class TestKubernetesStackAdapter(TestCase):
     def test_resource_status(self, mocked_aiohttp):
         self.update_read_return(replicas=1, available_replicas=1)
         self.assertEqual(
-            run_async(
-                self.kubernetes_adapter.resource_status,
-                resource_attributes=AttributeDict(
-                    drone_uuid="testsite-089123", remote_resource_uuid="123456"
-                ),
+            asyncio.run(
+                self.kubernetes_adapter.resource_status(
+                    resource_attributes=AttributeDict(
+                        drone_uuid="testsite-089123", remote_resource_uuid="123456"
+                    ),
+                )
             ),
             AttributeDict(
                 remote_resource_uuid="123456",
@@ -206,11 +203,12 @@ class TestKubernetesStackAdapter(TestCase):
         )
         self.update_read_return(replicas=0, available_replicas=1)
         self.assertEqual(
-            run_async(
-                self.kubernetes_adapter.resource_status,
-                resource_attributes=AttributeDict(
-                    drone_uuid="testsite-089123", remote_resource_uuid="123456"
-                ),
+            asyncio.run(
+                self.kubernetes_adapter.resource_status(
+                    resource_attributes=AttributeDict(
+                        drone_uuid="testsite-089123", remote_resource_uuid="123456"
+                    ),
+                )
             ),
             AttributeDict(
                 remote_resource_uuid="123456",
@@ -219,11 +217,12 @@ class TestKubernetesStackAdapter(TestCase):
         )
         self.update_read_return(replicas=1, available_replicas=None)
         self.assertEqual(
-            run_async(
-                self.kubernetes_adapter.resource_status,
-                resource_attributes=AttributeDict(
-                    drone_uuid="testsite-089123", remote_resource_uuid="123456"
-                ),
+            asyncio.run(
+                self.kubernetes_adapter.resource_status(
+                    resource_attributes=AttributeDict(
+                        drone_uuid="testsite-089123", remote_resource_uuid="123456"
+                    ),
+                )
             ),
             AttributeDict(
                 remote_resource_uuid="123456",
@@ -232,11 +231,12 @@ class TestKubernetesStackAdapter(TestCase):
         )
         self.update_read_side_effect(exception=K8SApiException(status=404))
         self.assertEqual(
-            run_async(
-                self.kubernetes_adapter.resource_status,
-                resource_attributes=AttributeDict(
-                    drone_uuid="testsite-089123", remote_resource_uuid="123456"
-                ),
+            asyncio.run(
+                self.kubernetes_adapter.resource_status(
+                    resource_attributes=AttributeDict(
+                        drone_uuid="testsite-089123", remote_resource_uuid="123456"
+                    ),
+                )
             ),
             AttributeDict(
                 remote_resource_uuid="123456",
@@ -246,11 +246,12 @@ class TestKubernetesStackAdapter(TestCase):
         self.update_read_side_effect(exception=K8SApiException(status=500))
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(K8SApiException):
-                run_async(
-                    self.kubernetes_adapter.resource_status,
-                    resource_attributes=AttributeDict(
-                        drone_uuid="testsite-089123", remote_resource_uuid="123456"
-                    ),
+                asyncio.run(
+                    self.kubernetes_adapter.resource_status(
+                        resource_attributes=AttributeDict(
+                            drone_uuid="testsite-089123", remote_resource_uuid="123456"
+                        ),
+                    )
                 )
             self.update_read_side_effect(exception=None)
 
@@ -265,9 +266,10 @@ class TestKubernetesStackAdapter(TestCase):
                 )
             ]
         )
-        run_async(
-            self.kubernetes_adapter.stop_resource,
-            resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+        asyncio.run(
+            self.kubernetes_adapter.stop_resource(
+                resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+            )
         )
         self.mock_kubernetes_api.return_value.read_namespaced_deployment.assert_called_with(  # noqa: B950
             name="testsite-089123", namespace="default"
@@ -278,9 +280,10 @@ class TestKubernetesStackAdapter(TestCase):
 
     @patch("kubernetes_asyncio.client.rest.aiohttp")
     def test_terminate_resource(self, mocked_aiohttp):
-        run_async(
-            self.kubernetes_adapter.terminate_resource,
-            resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+        asyncio.run(
+            self.kubernetes_adapter.terminate_resource(
+                resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+            )
         )
         self.mock_kubernetes_api.return_value.delete_namespaced_deployment.assert_called_with(  # noqa: B950
             name="testsite-089123",
@@ -292,17 +295,19 @@ class TestKubernetesStackAdapter(TestCase):
         self.update_delete_side_effect(exception=K8SApiException(status=500))
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(K8SApiException):
-                run_async(
-                    self.kubernetes_adapter.terminate_resource,
-                    resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+                asyncio.run(
+                    self.kubernetes_adapter.terminate_resource(
+                        resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+                    )
                 )
         self.update_delete_side_effect(exception=None)
         self.update_delete_hpa_side_effect(exception=K8SApiException(status=500))
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(K8SApiException):
-                run_async(
-                    self.kubernetes_adapter.terminate_resource,
-                    resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+                asyncio.run(
+                    self.kubernetes_adapter.terminate_resource(
+                        resource_attributes=AttributeDict(drone_uuid="testsite-089123"),
+                    )
                 )
         self.update_delete_hpa_side_effect(exception=None)
 

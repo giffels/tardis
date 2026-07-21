@@ -6,7 +6,6 @@ from tardis.exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.utilities.attributedict import AttributeDict
 from tests.utilities.utilities import mock_executor_run_command
-from tests.utilities.utilities import run_async
 
 from unittest import TestCase
 from unittest.mock import MagicMock, call, patch
@@ -221,15 +220,22 @@ class TestMoabAdapter(TestCase):
                 machine_type="test2large", site_name="TestSite"
             )
 
-    @mock_executor_run_command(TEST_DEPLOY_RESOURCE_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_DEPLOY_RESOURCE_RESPONSE
+            ),  # msub call in deploy_resource
+        ]
+    )
     def test_deploy_resource(self):
         self.assertDictEqual(
             AttributeDict(
                 remote_resource_uuid=4761849, resource_status=ResourceStatus.Booting
             ),
-            run_async(
-                self.moab_adapter.deploy_resource,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.moab_adapter.deploy_resource(
+                    resource_attributes=self.resource_attributes,
+                )
             ),
         )
 
@@ -237,7 +243,13 @@ class TestMoabAdapter(TestCase):
             "msub -j oe -m p -l walltime=02:00:00:00,mem=120gb,nodes=1:ppn=20 -v TardisDroneCores=128,TardisDroneMemory=120,TardisDroneDisk=100,TardisDroneUuid=testsite-abcdef startVM.py"  # noqa: B950
         )
 
-    @mock_executor_run_command(TEST_DEPLOY_RESOURCE_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_DEPLOY_RESOURCE_RESPONSE
+            ),  # msub call in deploy_resource_w_submit_options
+        ]
+    )
     def test_deploy_resource_w_submit_options(self):
         self.test_site_config.MachineTypeConfiguration.test2large.SubmitOptions = (
             AttributeDict(
@@ -246,9 +258,10 @@ class TestMoabAdapter(TestCase):
             )
         )
 
-        run_async(
-            self.moab_adapter.deploy_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            self.moab_adapter.deploy_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -266,26 +279,43 @@ class TestMoabAdapter(TestCase):
     def test_site_name(self):
         self.assertEqual(self.moab_adapter.site_name, "TestSite")
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE
+            ),  # showq call in resource_status, called twice in resource_status
+        ]
+        * 2
+    )
     def test_resource_status(self):
         self.assertDictEqual(
             AttributeDict(
                 remote_resource_uuid=4761849, resource_status=ResourceStatus.Booting
             ),
-            run_async(
-                self.moab_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.moab_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                )
             ),
         )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATE_TRANSLATION_RESPONSE)
+    @mock_executor_run_command(
+        # Multiplies the single-item list by the exact number of expected calls
+        [
+            AttributeDict(stdout=TEST_RESOURCE_STATE_TRANSLATION_RESPONSE)
+        ]  # showq call in resource_status, called twice per resource_status call
+        * (
+            2 * len(STATE_TRANSLATIONS)
+        )  # called len(STATE_TRANSLATIONS) times in this test
+    )
     def test_resource_state_translation(self):
         self.mock_executor.reset_mock()
         for num, (_, state) in enumerate(STATE_TRANSLATIONS):
             job_id = f"76242{num:02}"
-            return_resource_attributes = run_async(
-                self.moab_adapter.resource_status,
-                AttributeDict(remote_resource_uuid=job_id),
+            return_resource_attributes = asyncio.run(
+                self.moab_adapter.resource_status(
+                    AttributeDict(remote_resource_uuid=job_id),
+                )
             )
             self.assertEqual(return_resource_attributes.resource_status, state)
 
@@ -297,7 +327,14 @@ class TestMoabAdapter(TestCase):
             )
             self.mock_executor.reset_mock()
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE_RUNNING)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING
+            ),  # showq call in resource_status, called twice in resource_status
+        ]
+        * 2
+    )
     def test_resource_status_update(self):
         self.assertEqual(
             self.resource_attributes["resource_status"], ResourceStatus.Booting
@@ -307,89 +344,115 @@ class TestMoabAdapter(TestCase):
             AttributeDict(
                 remote_resource_uuid=4761849, resource_status=ResourceStatus.Running
             ),
-            run_async(
-                self.moab_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.moab_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                )
             ),
         )
 
-    @mock_executor_run_command(TEST_TERMINATE_RESOURCE_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_TERMINATE_RESOURCE_RESPONSE
+            ),  # canceljob call in stop_resource
+        ]
+    )
     def test_stop_resource(self):
-        run_async(
-            self.moab_adapter.stop_resource,
-            resource_attributes=self.resource_attributes,
-        )
-        self.mock_executor.return_value.run_command.assert_called_with(
-            "canceljob 4761849"
-        )
-
-    @mock_executor_run_command(TEST_TERMINATE_RESOURCE_RESPONSE)
-    def test_terminate_resource(self):
-        run_async(
-            self.moab_adapter.terminate_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            self.moab_adapter.stop_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
         self.mock_executor.return_value.run_command.assert_called_with(
             "canceljob 4761849"
         )
 
     @mock_executor_run_command(
-        "",
-        stderr=TEST_TERMINATE_DEAD_RESOURCE_RESPONSE,
-        exit_code=1,
-        raise_exception=CommandExecutionFailure(
-            message="Test",
-            stdout="",
-            stderr=TEST_TERMINATE_DEAD_RESOURCE_RESPONSE,
-            exit_code=1,
-        ),
+        [
+            AttributeDict(
+                stdout=TEST_TERMINATE_RESOURCE_RESPONSE
+            ),  # canceljob call in terminate_resource
+        ]
+    )
+    def test_terminate_resource(self):
+        asyncio.run(
+            self.moab_adapter.terminate_resource(
+                resource_attributes=self.resource_attributes,
+            )
+        )
+        self.mock_executor.return_value.run_command.assert_called_with(
+            "canceljob 4761849"
+        )
+
+    @mock_executor_run_command(
+        [
+            CommandExecutionFailure(
+                message="Test",
+                exit_code=1,
+                stderr=TEST_TERMINATE_DEAD_RESOURCE_RESPONSE,
+                stdout="",
+            ),  # canceljob call in terminate_resource
+        ]
     )
     def test_terminate_dead_resource(self):
         with self.assertLogs(level=logging.WARNING):
-            run_async(
-                self.moab_adapter.terminate_resource,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.moab_adapter.terminate_resource(
+                    resource_attributes=self.resource_attributes,
+                )
             )
 
     @mock_executor_run_command(
-        "",
-        exit_code=2,
-        raise_exception=CommandExecutionFailure(
-            message="Test", stdout="", stderr="", exit_code=2
-        ),
+        [
+            CommandExecutionFailure(
+                message="Test", stdout="", stderr="", exit_code=2
+            ),  # canceljob call in terminate_resource
+        ]
     )
     def test_terminate_resource_error(self):
         with self.assertRaises(CommandExecutionFailure):
-            run_async(
-                self.moab_adapter.terminate_resource,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.moab_adapter.terminate_resource(
+                    resource_attributes=self.resource_attributes,
+                )
             )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-        ),
+        [
+            CommandExecutionFailure(
+                message="Failed", stdout="Failed", stderr="Failed", exit_code=2
+            ),  # showq call in resource_status
+        ]
     )
     def test_resource_status_update_failed(self):
         with self.assertRaises(CommandExecutionFailure):
-            run_async(
-                self.moab_adapter.resource_status,
-                AttributeDict(
-                    resource_id=1351043,
-                    remote_resource_uuid=1351043,
-                    resource_state=ResourceStatus.Booting,
-                ),
+            asyncio.run(
+                self.moab_adapter.resource_status(
+                    AttributeDict(
+                        resource_id=1351043,
+                        remote_resource_uuid=1351043,
+                        resource_state=ResourceStatus.Booting,
+                    ),
+                )
             )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE_RUNNING)
-    def test_resource_status_of_completed_jobs(self):
-        response = run_async(
-            self.moab_adapter.resource_status,
+    @mock_executor_run_command(
+        [
             AttributeDict(
-                resource_id=1390065,
-                remote_resource_uuid=1351043,
-            ),
+                stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING
+            ),  # showq call in resource_status
+        ]
+        * 2
+    )
+    def test_resource_status_of_completed_jobs(self):
+        response = asyncio.run(
+            self.moab_adapter.resource_status(
+                AttributeDict(
+                    resource_id=1390065,
+                    remote_resource_uuid=1351043,
+                ),
+            )
         )
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
 

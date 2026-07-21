@@ -7,7 +7,7 @@ from datetime import datetime
 from unittest import TestCase
 from unittest.mock import patch
 
-from tests.utilities.utilities import run_async
+import asyncio
 
 
 class TestElasticsearchMonitoring(TestCase):
@@ -67,8 +67,8 @@ class TestElasticsearchMonitoring(TestCase):
             "hits": {"total": {"value": 2}}
         }
 
-        run_async(
-            self.plugin.notify, state=CleanupState(), resource_attributes=test_param
+        asyncio.run(
+            self.plugin.notify(state=CleanupState(), resource_attributes=test_param)
         )
 
         self.mock_elasticsearch.return_value.search.assert_called_with(
@@ -103,8 +103,8 @@ class TestElasticsearchMonitoring(TestCase):
             "hits": {"total": {"value": 2}}
         }
 
-        run_async(
-            self.plugin.notify, state=CleanupState(), resource_attributes=test_param
+        asyncio.run(
+            self.plugin.notify(state=CleanupState(), resource_attributes=test_param)
         )
 
         self.mock_elasticsearch.return_value.search.assert_called_with(

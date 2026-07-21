@@ -18,13 +18,11 @@ from tardis.resources.dronestates import ShuttingDownState
 from tardis.resources.dronestates import CleanupState
 from tardis.resources.dronestates import DownState
 from tardis.utilities.attributedict import AttributeDict
-from tests.utilities.utilities import async_return
-from tests.utilities.utilities import run_async
 
 from functools import partial
 from datetime import datetime, timedelta
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import asyncio
 import logging
@@ -57,48 +55,32 @@ class TestDroneStates(TestCase):
         self.drone._supply = 8.0
         self.drone.minimum_lifetime = 3600
         self.drone.set_state.side_effect = partial(mock_set_state, self.drone)
-        self.drone.site_agent.deploy_resource.return_value = async_return(
+        self.drone.site_agent.deploy_resource = AsyncMock(return_value=AttributeDict())
+        self.drone.site_agent.resource_status = AsyncMock(return_value=AttributeDict())
+        self.drone.site_agent.stop_resource = AsyncMock(return_value=AttributeDict())
+        self.drone.site_agent.terminate_resource = AsyncMock(
             return_value=AttributeDict()
         )
-        self.drone.site_agent.resource_status.return_value = async_return(
-            return_value=AttributeDict()
-        )
-        self.drone.site_agent.stop_resource.return_value = async_return(
-            return_value=AttributeDict()
-        )
-        self.drone.site_agent.terminate_resource.return_value = async_return(
-            return_value=AttributeDict()
-        )
-        self.drone.batch_system_agent.integrate_machine.return_value = async_return(
+        self.drone.batch_system_agent.integrate_machine = AsyncMock(return_value=None)
+        self.drone.batch_system_agent.disintegrate_machine = AsyncMock(
             return_value=None
         )
-        self.drone.batch_system_agent.disintegrate_machine.return_value = async_return(
-            return_value=None
-        )
-        self.drone.batch_system_agent.drain_machine.return_value = async_return(
-            return_value=None
-        )
-        self.drone.batch_system_agent.get_machine_status.return_value = async_return(
-            return_value=None
-        )
-        self.drone.batch_system_agent.get_allocation.return_value = async_return(
-            return_value=None
-        )
-        self.drone.batch_system_agent.get_utilisation.return_value = async_return(
-            return_value=None
-        )
+        self.drone.batch_system_agent.drain_machine = AsyncMock(return_value=None)
+        self.drone.batch_system_agent.get_machine_status = AsyncMock(return_value=None)
+        self.drone.batch_system_agent.get_allocation = AsyncMock(return_value=None)
+        self.drone.batch_system_agent.get_utilisation = AsyncMock(return_value=None)
 
     def run_the_matrix(self, matrix, initial_state):
         for resource_status, machine_status, new_state in matrix:
-            self.drone.site_agent.resource_status.return_value = async_return(
+            self.drone.site_agent.resource_status = AsyncMock(
                 return_value=AttributeDict(resource_status=resource_status)
             )
-            self.drone.batch_system_agent.get_machine_status.return_value = (
-                async_return(return_value=machine_status)
+            self.drone.batch_system_agent.get_machine_status = AsyncMock(
+                return_value=machine_status
             )
             self.drone.state.return_value = initial_state
             with self.assertLogs(None, level="DEBUG"):
-                run_async(self.drone.state.return_value.run, self.drone)
+                asyncio.run(self.drone.state.return_value.run(self.drone))
             self.assertIsInstance(self.drone.state, new_state)
 
     def run_side_effects(
@@ -107,14 +89,14 @@ class TestDroneStates(TestCase):
         for exception in exceptions:
             self.drone.state.return_value = initial_state
             api_call_to_test.side_effect = exception()
-            run_async(self.drone.state.return_value.run, self.drone)
+            asyncio.run(self.drone.state.return_value.run(self.drone))
             self.assertIsInstance(self.drone.state, final_state)
 
         api_call_to_test.side_effect = None
 
     def test_request_state(self):
         self.drone.state.return_value = RequestState()
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, BootingState)
 
         self.run_side_effects(
@@ -164,13 +146,13 @@ class TestDroneStates(TestCase):
         # Test draining procedure if cobald sets drone demand to zero
         self.drone.demand = 0.0
         self.drone.state.return_value = BootingState()
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, CleanupState)
         self.assertEqual(self.drone._supply, 0.0)
 
     def test_integrate_state(self):
         self.drone.state.return_value = IntegrateState
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, IntegratingState)
         self.drone.batch_system_agent.integrate_machine.assert_called_with(
             drone_uuid="test-923ABF"
@@ -195,7 +177,7 @@ class TestDroneStates(TestCase):
         self.run_the_matrix(matrix, initial_state=IntegratingState)
 
     def test_available_state(self):
-        self.drone.database_state.return_value = async_return()
+        self.drone.database_state = AsyncMock()
 
         matrix = [
             (ResourceStatus.Running, MachineStatus.Available, AvailableState),
@@ -214,7 +196,7 @@ class TestDroneStates(TestCase):
         # Test draining procedure if cobald sets drone demand to zero
         self.drone.demand = 0.0
         self.drone.state.return_value = AvailableState()
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, DrainState)
         self.assertEqual(self.drone._supply, 0.0)
 
@@ -222,18 +204,18 @@ class TestDroneStates(TestCase):
         self.drone.demand = 8.0
         self.drone.minimum_lifetime = 1
         self.drone.state.return_value = AvailableState()
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, DrainState)
 
         # Test remote draining procedure via REST service and database
-        self.drone.database_state.return_value = async_return(return_value=DrainState)
+        self.drone.database_state = AsyncMock(return_value=DrainState)
         self.drone.state.return_value = AvailableState()
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, DrainState)
 
     def test_drain_state(self):
         self.drone.state.return_value = DrainState
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, DrainingState)
         self.drone.batch_system_agent.drain_machine.assert_called_with(
             drone_uuid="test-923ABF"
@@ -254,7 +236,7 @@ class TestDroneStates(TestCase):
 
     def test_disintegrate_state(self):
         self.drone.state.return_value = DisintegrateState
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertIsInstance(self.drone.state, ShutDownState)
         self.drone.batch_system_agent.disintegrate_machine.assert_called_with(
             drone_uuid="test-923ABF"
@@ -286,7 +268,7 @@ class TestDroneStates(TestCase):
         )
 
         self.mock_drone.reset()
-        self.drone.site_agent.resource_status.return_value = async_return(
+        self.drone.site_agent.resource_status = AsyncMock(
             return_value=AttributeDict(resource_status=ResourceStatus.Running)
         )
         with self.assertLogs(level=logging.WARNING):
@@ -358,5 +340,5 @@ class TestDroneStates(TestCase):
 
     def test_down_state(self):
         self.drone.state.return_value = DownState()
-        run_async(self.drone.state.return_value.run, self.drone)
+        asyncio.run(self.drone.state.return_value.run(self.drone))
         self.assertEqual(self.drone.demand, 0.0)

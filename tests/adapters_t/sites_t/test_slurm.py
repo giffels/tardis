@@ -5,7 +5,8 @@ from tardis.exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
 from tardis.exceptions.executorexceptions import CommandExecutionFailure
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.utilities.attributedict import AttributeDict
-from tests.utilities.utilities import mock_executor_run_command, run_async
+from tests.utilities.utilities import mock_executor_run_command
+
 
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -93,7 +94,10 @@ class TestSlurmAdapter(TestCase):
         self.test_site_config.StatusUpdate = 10
         self.test_site_config.MachineTypeConfiguration = self.machine_type_configuration
         self.test_site_config.executor = self.mock_executor.return_value
-        self.test_site_config.bulk_delay = 0.01
+        # set to smallest positive float
+        # prevents BulkCall from blocking indefinitely on _get_bulk() when
+        # the event loop is closed before the semaphore is released by asyncio.run
+        self.test_site_config.bulk_delay = 0.01  # sys.float_info.min
 
         self.slurm_adapter = SlurmAdapter(
             machine_type="test2large", site_name="TestSite"
@@ -141,7 +145,12 @@ class TestSlurmAdapter(TestCase):
                 machine_type="test2large", site_name="TestSite"
             )
 
-    @mock_executor_run_command(TEST_DEPLOY_RESOURCE_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=TEST_DEPLOY_RESOURCE_RESPONSE),
+        ]  # sbatch call in deploy_resource, called 3 times in test
+        * 3
+    )
     def test_deploy_resource(self):
         resource_attributes = AttributeDict(
             machine_type="test2large",
@@ -158,7 +167,7 @@ class TestSlurmAdapter(TestCase):
             AttributeDict(
                 remote_resource_uuid=1390065, resource_status=ResourceStatus.Booting
             ),
-            run_async(self.slurm_adapter.deploy_resource, resource_attributes),
+            asyncio.run(self.slurm_adapter.deploy_resource(resource_attributes)),
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -169,7 +178,7 @@ class TestSlurmAdapter(TestCase):
 
         self.test_site_config.MachineMetaData.test2large.Memory = 2.5
 
-        run_async(self.slurm_adapter.deploy_resource, resource_attributes)
+        asyncio.run(self.slurm_adapter.deploy_resource(resource_attributes))
 
         self.mock_executor.return_value.run_command.assert_called_with(
             "sbatch -p normal -N 1 -n 20 -t 60 --mem=2560mb --export=SLURM_Walltime=60,TardisDroneCores=20,TardisDroneMemory=2560,TardisDroneDisk=102400,TardisDroneUuid=testsite-1390065 pilot.sh"  # noqa: B950
@@ -179,13 +188,19 @@ class TestSlurmAdapter(TestCase):
 
         self.test_site_config.MachineMetaData.test2large.Memory = 2.546372129
 
-        run_async(self.slurm_adapter.deploy_resource, resource_attributes)
+        asyncio.run(self.slurm_adapter.deploy_resource(resource_attributes))
 
         self.mock_executor.return_value.run_command.assert_called_with(
             "sbatch -p normal -N 1 -n 20 -t 60 --mem=2607mb --export=SLURM_Walltime=60,TardisDroneCores=20,TardisDroneMemory=2607,TardisDroneDisk=102400,TardisDroneUuid=testsite-1390065 pilot.sh"  # noqa: B950
         )
 
-    @mock_executor_run_command(TEST_DEPLOY_RESOURCE_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_DEPLOY_RESOURCE_RESPONSE
+            ),  # sbatch call in deploy_resource
+        ]
+    )
     def test_deploy_resource_w_submit_options(self):
         self.test_site_config.MachineTypeConfiguration.test2large.SubmitOptions = (
             AttributeDict(long=AttributeDict(gres="tmp:1G"))
@@ -193,18 +208,19 @@ class TestSlurmAdapter(TestCase):
 
         slurm_adapter = SlurmAdapter(machine_type="test2large", site_name="TestSite")
 
-        run_async(
-            slurm_adapter.deploy_resource,
-            resource_attributes=AttributeDict(
-                machine_type="test2large",
-                site_name="TestSite",
-                obs_machine_meta_data_translation_mapping=AttributeDict(
-                    Cores=1,
-                    Memory=1000,
-                    Disk=1000,
+        asyncio.run(
+            slurm_adapter.deploy_resource(
+                resource_attributes=AttributeDict(
+                    machine_type="test2large",
+                    site_name="TestSite",
+                    obs_machine_meta_data_translation_mapping=AttributeDict(
+                        Cores=1,
+                        Memory=1000,
+                        Disk=1000,
+                    ),
+                    drone_uuid="testsite-1390065",
                 ),
-                drone_uuid="testsite-1390065",
-            ),
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
@@ -222,15 +238,22 @@ class TestSlurmAdapter(TestCase):
     def test_site_name(self):
         self.assertEqual(self.slurm_adapter.site_name, "TestSite")
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE
+            ),  # squeue call in resource_status
+        ]
+    )
     def test_resource_status(self):
         self.assertDictEqual(
             AttributeDict(
                 resource_status=ResourceStatus.Booting, remote_resource_uuid=1390065
             ),
-            run_async(
-                self.slurm_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.slurm_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                ),
             ),
         )
 
@@ -238,7 +261,13 @@ class TestSlurmAdapter(TestCase):
             'squeue -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE
+            ),  # squeue call in resource_status
+        ]
+    )
     def test_resource_status_w_options(self):
         self.test_site_config.MachineTypeConfiguration.test2large.StatusOptions = (
             AttributeDict(
@@ -253,9 +282,10 @@ class TestSlurmAdapter(TestCase):
             AttributeDict(
                 resource_status=ResourceStatus.Booting, remote_resource_uuid=1390065
             ),
-            run_async(
-                slurm_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                slurm_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                ),
             ),
         )
 
@@ -263,7 +293,13 @@ class TestSlurmAdapter(TestCase):
             'squeue -p cm4_tiny --cluster=cm4 -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE_RUNNING)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout=TEST_RESOURCE_STATUS_RESPONSE_RUNNING
+            ),  # squeue call in resource_status
+        ]
+    )
     def test_update_resource_status(self):
         self.assertEqual(
             self.resource_attributes["resource_status"], ResourceStatus.Booting
@@ -273,9 +309,10 @@ class TestSlurmAdapter(TestCase):
             AttributeDict(
                 resource_status=ResourceStatus.Running, remote_resource_uuid=1390065
             ),
-            run_async(
-                self.slurm_adapter.resource_status,
-                resource_attributes=self.resource_attributes,
+            asyncio.run(
+                self.slurm_adapter.resource_status(
+                    resource_attributes=self.resource_attributes,
+                ),
             ),
         )
 
@@ -283,7 +320,13 @@ class TestSlurmAdapter(TestCase):
             'squeue -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(TEST_RESOURCE_STATUS_RESPONSE_ALL_STATES)
+    @mock_executor_run_command(
+        # Return 24 times (the number of states in state_translations dictionary)
+        [
+            AttributeDict(stdout=TEST_RESOURCE_STATUS_RESPONSE_ALL_STATES)
+        ]  # squeue call in resource_status
+        * 24
+    )
     def test_resource_state_translation(self):
         state_translations = {
             "BOOT_FAIL": ResourceStatus.Error,
@@ -314,9 +357,10 @@ class TestSlurmAdapter(TestCase):
 
         for id, value in enumerate(state_translations.values()):
             job_id = int(f"{id + 1000}000")
-            returned_resource_attributes = run_async(
-                self.slurm_adapter.resource_status,
-                AttributeDict(remote_resource_uuid=job_id),
+            returned_resource_attributes = asyncio.run(
+                self.slurm_adapter.resource_status(
+                    AttributeDict(remote_resource_uuid=job_id),
+                )
             )
             self.assertEqual(returned_resource_attributes.resource_status, value)
 
@@ -328,14 +372,19 @@ class TestSlurmAdapter(TestCase):
 
             self.mock_executor.reset_mock()
 
-    @mock_executor_run_command("")
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=""),  # squeue call in resource_status
+        ]
+    )
     def test_resource_status_of_completed_jobs_w_empty_reply(self):
-        response = run_async(
-            self.slurm_adapter.resource_status,
-            AttributeDict(
-                resource_id="1390065",
-                remote_resource_uuid="1351043",
-            ),
+        response = asyncio.run(
+            self.slurm_adapter.resource_status(
+                AttributeDict(
+                    resource_id="1390065",
+                    remote_resource_uuid="1351043",
+                ),
+            )
         )
 
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
@@ -345,21 +394,24 @@ class TestSlurmAdapter(TestCase):
         )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Run command squeue --job=1351043 via SSHExecutor failed",
-            stdout="",
-            stderr="slurm_load_jobs error: Invalid job id specified",
-            exit_code=1,
-        ),
+        [
+            AttributeDict(stdout=""),  # squeue call in resource_status
+            CommandExecutionFailure(
+                message="Run command squeue --job=1351043 via SSHExecutor failed",
+                stdout="",
+                stderr="slurm_load_jobs error: Invalid job id specified",
+                exit_code=1,
+            ),  # squeue call in resource_status (2nd call in test)
+        ]
     )
     def test_resource_status_of_completed_jobs_w_raised_exception(self):
-        response = run_async(
-            self.slurm_adapter.resource_status,
-            AttributeDict(
-                resource_id="1390065",
-                remote_resource_uuid="1351043",
-            ),
+        response = asyncio.run(
+            self.slurm_adapter.resource_status(
+                AttributeDict(
+                    resource_id="1390065",
+                    remote_resource_uuid="1351043",
+                ),
+            )
         )
 
         self.assertEqual(response.resource_status, ResourceStatus.Deleted)
@@ -386,55 +438,80 @@ class TestSlurmAdapter(TestCase):
             ),
         ]
 
+        async def run_gather():
+            return await asyncio.gather(*tasks)
+
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(asyncio.gather, *tasks)
+                asyncio.run(run_gather())
 
         self.mock_executor.return_value.run_command.assert_called_with(
             'squeue -o "%A|%N|%T" -h -t all --job=1351043,1351044'
         )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-        ),
+        [
+            CommandExecutionFailure(
+                message="Failed", stdout="Failed", stderr="Failed", exit_code=2
+            ),  # squeue call in resource_status
+        ]
     )
     def test_resource_status_update_failed(self):
         with self.assertLogs(level=logging.WARNING):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(
-                    self.slurm_adapter.resource_status,
-                    AttributeDict(remote_resource_uuid="1390065"),
+                asyncio.run(
+                    self.slurm_adapter.resource_status(
+                        AttributeDict(remote_resource_uuid="1390065"),
+                    )
                 )
 
         self.mock_executor.return_value.run_command.assert_called_with(
             'squeue -o "%A|%N|%T" -h -t all --job=1390065'
         )
 
-    @mock_executor_run_command(stdout="", stderr="", exit_code=0)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout="", stderr="", exit_code=0
+            ),  # scancel call in stop_resource
+        ]
+    )
     def test_stop_resource(self):
-        run_async(
-            self.slurm_adapter.stop_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            self.slurm_adapter.stop_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
             "scancel 1390065"
         )
 
-    @mock_executor_run_command(stdout="", stderr="", exit_code=0)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout="", stderr="", exit_code=0
+            ),  # scancel call in terminate_resource
+        ]
+    )
     def test_terminate_resource(self):
-        run_async(
-            self.slurm_adapter.terminate_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            self.slurm_adapter.terminate_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(
             "scancel 1390065"
         )
 
-    @mock_executor_run_command(stdout="", stderr="", exit_code=0)
+    @mock_executor_run_command(
+        [
+            AttributeDict(
+                stdout="", stderr="", exit_code=0
+            ),  # scancel call in terminate_resource
+        ]
+    )
     def test_terminate_resource_w_options(self):
         self.test_site_config.MachineTypeConfiguration.test2large.TerminateOptions = (
             AttributeDict(
@@ -445,9 +522,10 @@ class TestSlurmAdapter(TestCase):
 
         slurm_adapter = SlurmAdapter(machine_type="test2large", site_name="TestSite")
 
-        run_async(
-            slurm_adapter.terminate_resource,
-            resource_attributes=self.resource_attributes,
+        asyncio.run(
+            slurm_adapter.terminate_resource(
+                resource_attributes=self.resource_attributes,
+            )
         )
 
         self.mock_executor.return_value.run_command.assert_called_with(

@@ -1,8 +1,6 @@
 from tardis.exceptions.executorexceptions import CommandExecutionFailure
 from tardis.utilities.asynccachemap import AsyncCacheMap
 
-from tests.utilities.utilities import run_async
-
 from json.decoder import JSONDecodeError
 from datetime import datetime
 from datetime import timedelta
@@ -10,6 +8,7 @@ from functools import partial
 from types import MappingProxyType
 from unittest import TestCase
 
+import asyncio
 import logging
 
 
@@ -36,7 +35,7 @@ class TestAsyncCacheMap(TestCase):
         return self.test_data
 
     def update_status(self):
-        run_async(self.async_cache_map.update_status)
+        asyncio.run(self.async_cache_map.update_status())
 
     def test_update_async_cache_map(self):
         self.update_status()
@@ -58,17 +57,17 @@ class TestAsyncCacheMap(TestCase):
 
     def test_json_failing_update(self):
         with self.assertLogs(level=logging.WARNING):
-            run_async(self.json_failing_async_cache_map.update_status)
+            asyncio.run(self.json_failing_async_cache_map.update_status())
             self.assertEqual(len(self.json_failing_async_cache_map), 0)
 
     def test_command_failing_update(self):
         with self.assertLogs(level=logging.WARNING):
-            run_async(self.json_failing_async_cache_map.update_status)
+            asyncio.run(self.json_failing_async_cache_map.update_status())
             self.assertEqual(len(self.json_failing_async_cache_map), 0)
 
     def test_last_update(self):
         self.assertEqual(self.async_cache_map.last_update, datetime.fromtimestamp(0))
-        run_async(self.async_cache_map.update_status)
+        asyncio.run(self.async_cache_map.update_status())
         self.assertTrue(
             datetime.now() - self.async_cache_map.last_update < timedelta(seconds=1)
         )
@@ -83,7 +82,7 @@ class TestAsyncCacheMap(TestCase):
         self.assertFalse(self.async_cache_map != test_cache_map)
 
     def test_read_only_cache_returns_mappingproxy(self):
-        run_async(self.async_cache_map.update_status)  # populate data
+        asyncio.run(self.async_cache_map.update_status())  # populate data
         ro_cache = self.async_cache_map.read_only_cache
         self.assertIsInstance(ro_cache, MappingProxyType)
         self.assertEqual(dict(ro_cache), self.async_cache_map._data)

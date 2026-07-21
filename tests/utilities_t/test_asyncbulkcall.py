@@ -4,9 +4,7 @@ import sys
 from platform import python_implementation
 from unittest import TestCase
 
-from tardis.utilities.asyncbulkcall import AsyncBulkCall
-
-from tests.utilities.utilities import run_async
+from tardis.utilities.asyncbulkcall import AsyncBulkCall, LoopSynchronization
 
 
 class CallCounter:
@@ -37,7 +35,7 @@ class TestAsyncBulkCall(TestCase):
         for size in (1, 10, 100, 1000, 2, 3, 5, 7, 97, 2129):
             with self.subTest(size=size):
                 execution = AsyncBulkCall(CallCounter(), size=size, delay=0.1)
-                result = run_async(self.execute, execution, count=size * 3 + 5)
+                result = asyncio.run(self.execute(execution, count=size * 3 + 5))
                 self.assertEqual(result, [(i, i // size) for i in range(size * 3 + 5)])
 
     def test_bulk_delay(self):
@@ -46,7 +44,7 @@ class TestAsyncBulkCall(TestCase):
         # check that delay forces a bulk if the size is too large to be reached
         execution = AsyncBulkCall(CallCounter(), size=2**32, delay=bulk_delay)
         before = time.monotonic()
-        result = run_async(self.execute, execution, count=test_size)
+        result = asyncio.run(self.execute(execution, count=test_size))
         after = time.monotonic()
         # PyPy can have a huge overhead before the JIT has warmed up
         grace = 5 if python_implementation() != "PyPy" else 25
@@ -58,24 +56,27 @@ class TestAsyncBulkCall(TestCase):
         # sys.float_info.min is not the smallest float possible,
         # but it should be insignificant in all math
         execution = AsyncBulkCall(CallCounter(), size=2**32, delay=sys.float_info.min)
-        result = run_async(self.execute, execution, count=2048)
+        result = asyncio.run(self.execute(execution, count=2048))
         self.assertEqual(result, [(i, i) for i in range(2048)])
 
     def test_restart(self):
         """Test that calls work after pausing"""
-        run_async(self.check_restart)
+        asyncio.run(self.check_restart())
 
     async def check_restart(self):
         bunch_size = 4
         # use large delay to only trigger on size
         execution = AsyncBulkCall(CallCounter(), size=bunch_size // 2, delay=256)
+        current_loop = asyncio.get_running_loop()
         for repeat in range(6):
             result = await self.execute(execution, bunch_size)
             self.assertEqual(
                 result, [(i, i // 2 + repeat * 2) for i in range(bunch_size)]
             )
             await asyncio.sleep(0.01)  # pause to allow for cleanup
-            assert execution._dispatch_task is None
+
+            # Update: Check that the loop key has been removed from the weak dict
+            self.assertNotIn(current_loop, execution._dispatch_tasks)
 
     def test_sanity_checks(self):
         """Test against illegal settings"""
@@ -96,3 +97,202 @@ class TestAsyncBulkCall(TestCase):
                         delay=1.0,
                         concurrent=wrong_concurrency,
                     )
+
+    def test_abandoned_queue_cancellation_on_loop_swap(self):
+        """
+        Test that pending tasks left over from an old loop are safely cleared
+        upon a loop swap.
+        """
+        execution = AsyncBulkCall(CallCounter(), size=100, delay=0.01)
+
+        abandoned_loop = None
+
+        async def start_and_abandon():
+            nonlocal abandoned_loop
+            abandoned_loop = asyncio.get_running_loop()
+            fake_future = abandoned_loop.create_future()
+
+            # Dynamically initialize the loop synchronization reference just
+            # like __call__ does
+            if abandoned_loop not in execution._loop_synchronization:
+                execution._loop_synchronization[abandoned_loop] = (
+                    LoopSynchronization.create(execution._concurrency)
+                )
+
+            execution._loop_synchronization[abandoned_loop].queue.put_nowait(
+                (999, fake_future)
+            )
+
+        asyncio.run(start_and_abandon())
+
+        # Verify that the item is sitting stale inside the specific old loop's queue
+        self.assertIn(abandoned_loop, execution._loop_synchronization)
+        self.assertFalse(execution._loop_synchronization[abandoned_loop].queue.empty())
+
+        # Move to a new event loop execution block
+        async def verify_clean_slate():
+            task = asyncio.ensure_future(execution(123))
+            return await task
+
+        before = time.monotonic()
+        result = asyncio.run(verify_clean_slate())
+        after = time.monotonic()
+
+        # The execution should be near-instant (well under 0.1s) and warning-free
+        self.assertLess(after - before, 0.1)
+        self.assertEqual(result, (123, 0))
+
+    def test_concurrency_limit_enforced_and_released(self):
+        """
+        Test that the concurrency limit works precisely and doesn't freeze due
+        to an uncalled release.
+        """
+
+        async def slow_command(*tasks):
+            await asyncio.sleep(
+                0.05
+            )  # block execution briefly to stack concurrent bulks
+            return [t for t in tasks]
+
+        # Max 2 concurrent execution batches allowed at a time
+        execution = AsyncBulkCall(slow_command, size=1, delay=0.1, concurrent=2)
+
+        async def run_test():
+            # Send 3 concurrent items. With size=1, they form 3 separate batches.
+            # Batch 1 and 2 fill up the concurrency slots (limit=2).
+            # Batch 3 will wait until either Batch 1 or 2 finishes and releases
+            # its semaphore slot.
+            tasks = [asyncio.ensure_future(execution(i)) for i in range(3)]
+            return await asyncio.gather(*tasks)
+
+        # If the semaphore release fix works, this returns cleanly.
+        # If the fix fails, this would hang indefinitely on the 3rd item.
+        result = asyncio.run(run_test())
+        self.assertEqual(result, [0, 1, 2])
+
+    def test_multi_loop_reinitialization(self):
+        """
+        Test that re-using an AsyncBulkCall instance across separate
+        `asyncio.run` statements does not hang.
+        """
+        execution = AsyncBulkCall(CallCounter(), size=5, delay=0.1)
+
+        # Run 1: First event loop lifecycle
+        result_1 = asyncio.run(self.execute(execution, count=5))
+        self.assertEqual(result_1, [(i, 0) for i in range(5)])
+
+        # Run 2: New event loop lifecycle.
+        # This will trigger the dynamic loop check and successfully reset the
+        # loop-bound objects
+        result_2 = asyncio.run(self.execute(execution, count=5))
+
+        # CallCounter is persistent on the execution instance, so calls are
+        # incremented to 1
+        self.assertEqual(result_2, [(i, 1) for i in range(5)])
+
+    def test_final_guard_handles_late_enqueues(self):
+        """
+        Verifies that the final guard in _bulk_dispatch successfully respawns
+        a worker if a new item is queued during the teardown phase.
+        """
+        asyncio.run(self.check_final_guard_handles_late_enqueues())
+
+    async def check_final_guard_handles_late_enqueues(self):
+        # Using size=1 means every call immediately satisfies a complete bulk
+        execution = AsyncBulkCall(CallCounter(), size=1, delay=0.01)
+        current_loop = asyncio.get_running_loop()
+
+        # Pre-initialize loop-bound synchronization resources so we can grab the
+        # queue reference
+        if current_loop not in execution._loop_synchronization:
+            execution._loop_synchronization[current_loop] = LoopSynchronization.create(
+                execution._concurrency
+            )
+        synchronized_resources = execution._loop_synchronization[current_loop]
+
+        # Kick off an initial call to wake up the worker loop
+        task1_future = asyncio.create_task(execution("task_1"))
+
+        # Yield control to let _bulk_dispatch spin up, process task_1,
+        # and sit on the `await asyncio.sleep(0)` right before it checks the
+        # while loop condition again.
+        await asyncio.sleep(0)
+
+        # Manually inject a second task directly into the queue.
+        # This bypasses execution()'s worker-spawn checks, perfectly mimicking
+        # the race condition where an item lands in the queue right as the
+        # worker is shutting down.
+        result_future = current_loop.create_future()
+        synchronized_resources.queue.put_nowait(("task_2", result_future))
+
+        # Trick the while loop!
+        # We mock empty() to return True once so the main loop thinks it's done
+        # and exits.
+        # Subsequent calls will use the real method so the final guard sees the item.
+        original_empty = synchronized_resources.queue.empty
+        empty_called = False
+
+        def mock_empty():
+            nonlocal empty_called
+            if not empty_called:
+                empty_called = True
+                return True  # Force the while loop to exit
+            return original_empty()
+
+        synchronized_resources.queue.empty = mock_empty
+
+        # Await the late-arriving future with a brief timeout.
+        # If the final guard works, it notices the queue isn't empty, revives
+        # the dispatch loop, and resolves.
+        # If the final guard is missing or broken, this hangs forever and hits
+        # the timeout.
+        try:
+            await asyncio.wait_for(result_future, timeout=0.2)
+            self.assertTrue(result_future.done())
+            self.assertEqual(result_future.result(), ("task_2", 1))
+        except asyncio.TimeoutError:
+            self.fail(
+                "Task 2 was stranded in the queue! The final guard failed to respawn the worker."  # noqa B950
+            )
+
+        await task1_future
+
+
+class TestLoopSynchronizationFactory(TestCase):
+    def test_create_inside_event_loop(self):
+        """
+        Verifies that create() successfully initializes LoopSynchronization
+        when an event loop is running.
+        """
+
+        async def run_test():
+            concurrency_limit = 5
+
+            # Call the factory method inside the running loop context
+            instance = LoopSynchronization.create(concurrency_limit)
+
+            # Assert correct types are initialized
+            self.assertIsInstance(instance, LoopSynchronization)
+            self.assertIsInstance(instance.queue, asyncio.Queue)
+            self.assertIsInstance(instance.semaphore, asyncio.BoundedSemaphore)
+
+            # Verify the semaphore's internal value matches our concurrency parameter
+            # Note: _value is an implementation detail of asyncio.BoundedSemaphore
+            self.assertEqual(instance.semaphore._value, concurrency_limit)
+
+        # asyncio.run handles setting up and tearing down a fresh event loop
+        asyncio.run(run_test())
+
+    def test_create_outside_event_loop_raises_error(self):
+        """
+        Verifies that create() raises a RuntimeError with the expected
+        explanatory message when called outside an active event loop.
+        """
+        # Ensure no event loop is running during this call
+        with self.assertRaises(RuntimeError) as context:
+            LoopSynchronization.create(concurrency=3)
+
+        self.assertIn(
+            "LoopSynchronization must be initialized within a running event loop.",
+            str(context.exception),
+        )

@@ -1,4 +1,3 @@
-from tests.utilities.utilities import async_return, run_async
 from tardis.utilities.attributedict import AttributeDict
 from tardis.utilities.executors.sshexecutor import (
     SSHExecutor,
@@ -15,7 +14,7 @@ from tardis.exceptions.tardisexceptions import TardisAuthError
 from asyncssh import ChannelOpenError, ConnectionLost, DisconnectError, ProcessError
 
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import asyncio
 import yaml
@@ -77,13 +76,15 @@ class TestSSHExecutorUtilities(TestCase):
     def test_max_sessions(self):
         with self.subTest(sessions="default"):
             self.assertEqual(
-                DEFAULT_MAX_SESSIONS, run_async(probe_max_session, MockConnection())
+                DEFAULT_MAX_SESSIONS, asyncio.run(probe_max_session(MockConnection()))
             )
         for expected in (1, 9, 11, 20, 100):
             with self.subTest(sessions=expected):
                 self.assertEqual(
                     expected,
-                    run_async(probe_max_session, MockConnection(max_sessions=expected)),
+                    asyncio.run(
+                        probe_max_session(MockConnection(max_sessions=expected))
+                    ),
                 )
 
 
@@ -102,16 +103,17 @@ class TestMFASSHClient(TestCase):
         self.mfa_ssh_client = MFASSHClient(mfa_config=mfa_config)
 
     def test_kbdint_auth_requested(self):
-        self.assertEqual(run_async(self.mfa_ssh_client.kbdint_auth_requested), "")
+        self.assertEqual(asyncio.run(self.mfa_ssh_client.kbdint_auth_requested()), "")
 
     def test_kbdint_challenge_received(self):
         def test_responses(prompts, num_of_expected_responses):
-            responses = run_async(
-                self.mfa_ssh_client.kbdint_challenge_received,
-                name="test",
-                instructions="no",
-                lang="en",
-                prompts=prompts,
+            responses = asyncio.run(
+                self.mfa_ssh_client.kbdint_challenge_received(
+                    name="test",
+                    instructions="no",
+                    lang="en",
+                    prompts=prompts,
+                )
             )
 
             self.assertEqual(len(responses), num_of_expected_responses)
@@ -131,12 +133,13 @@ class TestMFASSHClient(TestCase):
 
         with self.assertRaises(TardisAuthError) as tae:
             with self.assertLogs(level=logging.ERROR):
-                run_async(
-                    self.mfa_ssh_client.kbdint_challenge_received,
-                    name="test",
-                    instructions="no",
-                    lang="en",
-                    prompts=prompts_to_fail,
+                asyncio.run(
+                    self.mfa_ssh_client.kbdint_challenge_received(
+                        name="test",
+                        instructions="no",
+                        lang="en",
+                        prompts=prompts_to_fail,
+                    )
                 )
         self.assertIn(
             "Keyboard interactive authentication failed: Unexpected Prompt",
@@ -164,19 +167,17 @@ class TestSSHExecutor(TestCase):
 
     def setUp(self) -> None:
         self.response = AttributeDict(stderr="", exit_status=0)
-        self.mock_asyncssh.connect.return_value = async_return(
-            return_value=MockConnection()
-        )
+        self.mock_asyncssh.connect = AsyncMock(return_value=MockConnection())
         self.test_asyncssh_params = AttributeDict(
             host="test_host", username="test", client_keys=["TestKey"]
         )
         self.executor = SSHExecutor(**self.test_asyncssh_params)
         self.mock_asyncssh.reset_mock()
 
-    @patch("tardis.utilities.executors.sshexecutor.asyncio.sleep", async_return)
+    @patch("tardis.utilities.executors.sshexecutor.asyncio.sleep", AsyncMock())
     def test_establish_connection(self):
         self.assertIsInstance(
-            run_async(self.executor._establish_connection), MockConnection
+            asyncio.run(self.executor._establish_connection()), MockConnection
         )
 
         self.mock_asyncssh.connect.assert_called_with(**self.test_asyncssh_params)
@@ -193,7 +194,7 @@ class TestSSHExecutor(TestCase):
             self.mock_asyncssh.connect.side_effect = exception
 
             with self.assertRaises(type(exception)):
-                run_async(self.executor._establish_connection)
+                asyncio.run(self.executor._establish_connection())
 
             self.assertEqual(self.mock_asyncssh.connect.call_count, 10)
 
@@ -205,12 +206,12 @@ class TestSSHExecutor(TestCase):
                 return connection
 
         self.assertIsNone(self.executor._connection_state)
-        run_async(force_connection)
+        asyncio.run(force_connection())
         self.assertIsInstance(
             self.executor._connection_state.connection, MockConnection
         )
         current_ssh_connection = self.executor._connection_state
-        run_async(force_connection)
+        asyncio.run(force_connection())
         # make sure the connection is not needlessly replaced
         self.assertEqual(self.executor._connection_state, current_ssh_connection)
 
@@ -241,7 +242,7 @@ class TestSSHExecutor(TestCase):
             "tardis.utilities.executors.sshexecutor.probe_max_session",
             mocked_probe_max_session,
         ):
-            run_async(run_race_condition)
+            asyncio.run(run_race_condition())
 
     def test_lock(self):
         self.assertIsInstance(self.executor.lock, asyncio.Lock)
@@ -262,15 +263,17 @@ class TestSSHExecutor(TestCase):
             return queued
 
         for sessions in (1, 8, 10, 12, 20):
+            # Reset connection state: so a new Semaphore is bound to the new loop
+            self.executor._connection_state = None
             with self.subTest(sessions=sessions):
                 self.assertEqual(
                     sessions > DEFAULT_MAX_SESSIONS,
-                    run_async(is_queued, sessions),
+                    asyncio.run(is_queued(sessions)),
                 )
 
     def test_run_command(self):
         self.assertEqual(
-            run_async(self.executor.run_command, command="Test").stdout,
+            asyncio.run(self.executor.run_command(command="Test")).stdout,
             "command=Test, stdin=None",
         )
         self.mock_asyncssh.connect.assert_called_with(
@@ -278,8 +281,11 @@ class TestSSHExecutor(TestCase):
         )
         self.mock_asyncssh.reset_mock()
 
-        response = run_async(
-            self.executor.run_command, command="Test", stdin_input="Test"
+        # Clear state because we are entering a new asyncio.run loop
+        self.executor._connection_state = None
+
+        response = asyncio.run(
+            self.executor.run_command(command="Test", stdin_input="Test")
         )
 
         self.assertEqual(response.stdout, "command=Test, stdin=Test")
@@ -288,13 +294,16 @@ class TestSSHExecutor(TestCase):
 
         self.assertEqual(response.exit_code, 0)
 
+        # Clear state because we are entering a new asyncio.run loop
+        self.executor._connection_state = None
+
         with self.assertRaises(ExecutorFailure) as cef:
-            run_async(self.executor.run_command, command="lost_connection")
+            asyncio.run(self.executor.run_command(command="lost_connection"))
         self.assertEqual(cef.exception.executor, self.executor)
 
         raising_executor = SSHExecutor(**self.test_asyncssh_params)
 
-        self.mock_asyncssh.connect.return_value = async_return(
+        self.mock_asyncssh.connect = AsyncMock(
             return_value=MockConnection(
                 exception=ProcessError(
                     env="Test",
@@ -309,19 +318,29 @@ class TestSSHExecutor(TestCase):
             )
         )
 
+        # Clear state because we are entering a new asyncio.run loop
+        self.executor._connection_state = None
+
         with self.assertRaises(CommandExecutionFailure):
-            run_async(raising_executor.run_command, command="Test", stdin_input="Test")
+            asyncio.run(
+                raising_executor.run_command(command="Test", stdin_input="Test")
+            )
 
         raising_executor = SSHExecutor(**self.test_asyncssh_params)
 
-        self.mock_asyncssh.connect.return_value = async_return(
+        self.mock_asyncssh.connect = AsyncMock(
             return_value=MockConnection(
                 exception=ChannelOpenError(reason="test_reason", code=255)
             )
         )
 
+        # Clear state because we are entering a new asyncio.run loop
+        self.executor._connection_state = None
+
         with self.assertRaises(ExecutorFailure):
-            run_async(raising_executor.run_command, command="Test", stdin_input="Test")
+            asyncio.run(
+                raising_executor.run_command(command="Test", stdin_input="Test")
+            )
 
     def test_run_command_retry(self):
         """Test that a failed command is retried and may succeed"""
@@ -331,39 +350,39 @@ class TestSSHExecutor(TestCase):
         )
         # acceptable failure number
         self.mock_asyncssh.connect.side_effect = [
-            async_return(return_value=broken_connection),
-            async_return(return_value=MockConnection()),
+            broken_connection,
+            MockConnection(),
         ]
         reconnected_executor = SSHExecutor(
             on_disconnect_retry=1, **self.test_asyncssh_params
         )
 
-        response = run_async(
-            reconnected_executor.run_command, command="Test", stdin_input="Test"
+        response = asyncio.run(
+            reconnected_executor.run_command(command="Test", stdin_input="Test")
         )
         self.assertEqual(response.stdout, "command=Test, stdin=Test")
         self.assertEqual(response.exit_code, 0)
 
         # too many failures
         self.mock_asyncssh.connect.side_effect = [
-            async_return(return_value=broken_connection),
-            async_return(return_value=broken_connection),
-            async_return(return_value=MockConnection()),
+            broken_connection,
+            broken_connection,
+            MockConnection(),
         ]
         disconnected_executor = SSHExecutor(
             on_disconnect_retry=1, **self.test_asyncssh_params
         )
 
         with self.assertRaises(ExecutorFailure):
-            run_async(
-                disconnected_executor.run_command, command="Test", stdin_input="Test"
+            asyncio.run(
+                disconnected_executor.run_command(command="Test", stdin_input="Test")
             )
 
     def test_construction_by_yaml(self):
         def test_yaml_construction(test_executor, *args, **kwargs):
             self.assertEqual(
-                run_async(
-                    test_executor.run_command, command="Test", stdin_input="Test"
+                asyncio.run(
+                    test_executor.run_command(command="Test", stdin_input="Test")
                 ).stdout,
                 "command=Test, stdin=Test",
             )
@@ -426,9 +445,7 @@ class TestDupingSSHExecutor(TestCase):
 
     def setUp(self) -> None:
         self.response = AttributeDict(stderr="", exit_status=0)
-        self.mock_asyncssh.connect.return_value = async_return(
-            return_value=MockConnection()
-        )
+        self.mock_asyncssh.connect = AsyncMock(return_value=MockConnection())
         self.test_asyncssh_params = AttributeDict(
             host="test_host", username="test", client_keys=["TestKey"]
         )
@@ -443,8 +460,8 @@ class TestDupingSSHExecutor(TestCase):
             self.assertEqual(response.stderr, "TestError")
             self.assertEqual(response.exit_code, 0)
 
-        response = run_async(
-            self.executor.run_command, command="Test", stdin_input="TestStdInput"
+        response = asyncio.run(
+            self.executor.run_command(command="Test", stdin_input="TestStdInput")
         )
 
         test_wrapper_and_response(wrapper="/bin/bash", response=response)
@@ -453,8 +470,8 @@ class TestDupingSSHExecutor(TestCase):
             wrapper="test_wrapper", **self.test_asyncssh_params
         )
 
-        response = run_async(
-            self.executor.run_command, command="Test", stdin_input="TestStdInput"
+        response = asyncio.run(
+            self.executor.run_command(command="Test", stdin_input="TestStdInput")
         )
 
         test_wrapper_and_response(wrapper="test_wrapper", response=response)
@@ -463,10 +480,11 @@ class TestDupingSSHExecutor(TestCase):
         def test_yaml_construction(test_executor, wrapper, *args, **kwargs):
             command = "Test"
             self.assertEqual(
-                run_async(
-                    test_executor.run_command,
-                    command=command,
-                    stdin_input="TestStdInput",
+                asyncio.run(
+                    test_executor.run_command(
+                        command=command,
+                        stdin_input="TestStdInput",
+                    )
                 ).stdout,
                 f"command={wrapper}, stdin={command}\nTestStdInput\n",
             )

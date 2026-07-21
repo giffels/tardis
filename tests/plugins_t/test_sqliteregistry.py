@@ -9,12 +9,12 @@ from tardis.plugins.sqliteregistry import (
     convert_datetime,
 )
 from tardis.utilities.attributedict import AttributeDict
-from tests.utilities.utilities import run_async
 
 from unittest import TestCase
 from unittest.mock import patch
 from unittest.mock import Mock
 
+import asyncio
 import datetime
 import os
 import sqlite3
@@ -202,20 +202,22 @@ class TestSqliteRegistry(TestCase):
     def test_get_resource_state(self):
         self.registry.add_site(self.test_site_name)
         self.registry.add_machine_types(self.test_site_name, self.test_machine_type)
-        run_async(self.registry.notify, RequestState(), self.test_resource_attributes)
+        asyncio.run(self.registry.notify(RequestState(), self.test_resource_attributes))
 
         self.assertEqual(
-            run_async(
-                self.registry.get_resource_state,
-                drone_uuid=self.test_resource_attributes["drone_uuid"],
+            asyncio.run(
+                self.registry.get_resource_state(
+                    drone_uuid=self.test_resource_attributes["drone_uuid"],
+                )
             ),
             [{"state": "RequestState"}],
         )
 
         self.assertEqual(
-            run_async(
-                self.registry.get_resource_state,
-                drone_uuid="does_not_exists",
+            asyncio.run(
+                self.registry.get_resource_state(
+                    drone_uuid="does_not_exists",
+                )
             ),
             [],
         )
@@ -224,7 +226,7 @@ class TestSqliteRegistry(TestCase):
     def test_get_resources(self):
         self.registry.add_site(self.test_site_name)
         self.registry.add_machine_types(self.test_site_name, self.test_machine_type)
-        run_async(self.registry.notify, RequestState(), self.test_resource_attributes)
+        asyncio.run(self.registry.notify(RequestState(), self.test_resource_attributes))
 
         self.assertListEqual(
             self.registry.get_resources(
@@ -250,26 +252,27 @@ class TestSqliteRegistry(TestCase):
         self.registry.add_site(self.test_site_name)
         self.registry.add_machine_types(self.test_site_name, self.test_machine_type)
 
-        run_async(self.registry.notify, RequestState(), self.test_resource_attributes)
+        asyncio.run(self.registry.notify(RequestState(), self.test_resource_attributes))
 
         self.assertEqual([self.test_notify_result], fetch_all())
 
         with self.assertRaises(sqlite3.IntegrityError) as ie:
-            run_async(
-                self.registry.notify, RequestState(), self.test_resource_attributes
+            asyncio.run(
+                self.registry.notify(RequestState(), self.test_resource_attributes)
             )
         self.assertTrue("unique" in str(ie.exception).lower())
 
-        run_async(
-            self.registry.notify,
-            BootingState(),
-            self.test_updated_resource_attributes,
+        asyncio.run(
+            self.registry.notify(
+                BootingState(),
+                self.test_updated_resource_attributes,
+            )
         )
 
         self.assertEqual([self.test_updated_notify_result], fetch_all())
 
-        run_async(
-            self.registry.notify, DownState(), self.test_updated_resource_attributes
+        asyncio.run(
+            self.registry.notify(DownState(), self.test_updated_resource_attributes)
         )
 
         self.assertListEqual([], fetch_all())
@@ -295,12 +298,12 @@ class TestSqliteRegistry(TestCase):
         bind_parameters = {"state": "RequestState"}
         bind_parameters.update(self.test_resource_attributes)
 
-        run_async(self.registry.insert_resource, bind_parameters)
+        asyncio.run(self.registry.insert_resource(bind_parameters))
 
         self.assertListEqual([self.test_notify_result], fetch_all())
 
         with self.assertRaises(sqlite3.IntegrityError) as ie:
-            run_async(self.registry.insert_resource, bind_parameters)
+            asyncio.run(self.registry.insert_resource(bind_parameters))
         self.assertTrue("unique" in str(ie.exception).lower())
 
         self.assertListEqual([self.test_notify_result], fetch_all())
@@ -311,7 +314,7 @@ class TestSqliteRegistry(TestCase):
         bind_parameters["drone_uuid"] = f"{self.other_test_site_name}-045285abef1"
         bind_parameters["site_name"] = self.other_test_site_name
 
-        run_async(self.registry.insert_resource, bind_parameters)
+        asyncio.run(self.registry.insert_resource(bind_parameters))
 
         other_test_notify_result = (
             self.test_resource_attributes["remote_resource_uuid"],

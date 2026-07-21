@@ -3,12 +3,12 @@ from tardis.exceptions.tardisexceptions import TardisError
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.utilities.attributedict import AttributeDict
 
-from tests.utilities.utilities import run_async
-
 from datetime import datetime
 from datetime import timedelta
 from unittest.mock import patch
 from unittest import TestCase
+
+import asyncio
 
 
 class TestFakeSiteAdapter(TestCase):
@@ -42,7 +42,7 @@ class TestFakeSiteAdapter(TestCase):
         return AttributeDict(test2large=AttributeDict(jdl="submit.jdl"))
 
     def test_deploy_resource(self):
-        response = run_async(self.adapter.deploy_resource, AttributeDict())
+        response = asyncio.run(self.adapter.deploy_resource(AttributeDict()))
         self.assertEqual(response.resource_status, ResourceStatus.Booting)
 
     def test_machine_meta_data(self):
@@ -65,9 +65,10 @@ class TestFakeSiteAdapter(TestCase):
         )
         self.assertEqual(
             AttributeDict(),  # no update require, resource still in Booting state
-            run_async(
-                self.adapter.resource_status,
-                resource_attributes,
+            asyncio.run(
+                self.adapter.resource_status(
+                    resource_attributes,
+                )
             ),
         )
 
@@ -77,7 +78,7 @@ class TestFakeSiteAdapter(TestCase):
 
         self.assertDictEqual(
             AttributeDict(resource_status=ResourceStatus.Running),
-            run_async(self.adapter.resource_status, resource_attributes),
+            asyncio.run(self.adapter.resource_status(resource_attributes)),
         )
 
         # test resource status of stop resources
@@ -86,7 +87,7 @@ class TestFakeSiteAdapter(TestCase):
         )
         self.assertEqual(
             AttributeDict(),
-            run_async(self.adapter.resource_status, resource_attributes),
+            asyncio.run(self.adapter.resource_status(resource_attributes)),
         )
         self.assertDictEqual(
             AttributeDict(
@@ -103,7 +104,7 @@ class TestFakeSiteAdapter(TestCase):
         )
         self.assertEqual(
             AttributeDict(),
-            run_async(self.adapter.resource_status, resource_attributes),
+            asyncio.run(self.adapter.resource_status(resource_attributes)),
         )
         self.assertDictEqual(
             AttributeDict(
@@ -120,7 +121,7 @@ class TestFakeSiteAdapter(TestCase):
             created=datetime.now(),
             resource_status=ResourceStatus.Running,
         )
-        run_async(self.adapter.stop_resource, resource_attributes)
+        asyncio.run(self.adapter.stop_resource(resource_attributes))
         self.assertEqual(resource_attributes.resource_status, ResourceStatus.Stopped)
 
     def test_terminate_resource(self):
@@ -129,7 +130,7 @@ class TestFakeSiteAdapter(TestCase):
             created=datetime.now(),
             resource_status=ResourceStatus.Running,
         )
-        run_async(self.adapter.terminate_resource, resource_attributes)
+        asyncio.run(self.adapter.terminate_resource(resource_attributes))
         self.assertEqual(resource_attributes.resource_status, ResourceStatus.Deleted)
 
     def test_exception_handling(self):

@@ -1,7 +1,8 @@
+import asyncio
 import logging
 
-from tests.utilities.utilities import run_async
 from tests.utilities.utilities import mock_executor_run_command
+
 from tardis.adapters.batchsystems.slurm import SlurmAdapter
 from tardis.utilities.attributedict import AttributeDict
 
@@ -9,8 +10,6 @@ from tardis.adapters.batchsystems.slurm import slurm_status_updater
 from tardis.interfaces.batchsystemadapter import MachineStatus
 
 from tardis.exceptions.executorexceptions import CommandExecutionFailure
-
-from functools import partial
 
 from unittest.mock import patch
 from unittest import TestCase
@@ -75,37 +74,50 @@ class TestSlurmAdapter(TestCase):
 
     def test_disintegrate_machine(self):
         self.assertIsNone(
-            run_async(self.slurm_adapter.disintegrate_machine, drone_uuid="test")
+            asyncio.run(self.slurm_adapter.disintegrate_machine(drone_uuid="test"))
         )
 
-    @mock_executor_run_command(stdout=SINFO_RETURN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in drain_machine
+            AttributeDict(return_value=0),  # scontrol call in drain_machine
+        ]
+    )
     def test_drain_machine(self):
-        run_async(self.slurm_adapter.drain_machine, drone_uuid="VM-1")
+        asyncio.run(self.slurm_adapter.drain_machine(drone_uuid="VM-1"))
         self.mock_executor.return_value.run_command.assert_called_with(
             "scontrol update NodeName=host-10-18-1-1 State=DRAIN Reason='COBalD/TARDIS'"
         )
         self.mock_executor.reset_mock()
 
         self.assertIsNone(
-            run_async(self.slurm_adapter.drain_machine, drone_uuid="not_exists")
+            asyncio.run(self.slurm_adapter.drain_machine(drone_uuid="not_exists"))
         )
 
     @mock_executor_run_command(
-        stdout="",
-        raise_exception=CommandExecutionFailure(
-            message="Failed", stdout="Failed", stderr="Failed", exit_code=2
-        ),
+        [
+            CommandExecutionFailure(
+                message="Failed", stdout="Failed", stderr="Failed", exit_code=2
+            ),  # sinfo call in update_status
+        ]
     )
     def test_update_exception(self):
         with self.assertLogs(level=logging.WARNING):
-            self.assertIsNone(run_async(self.slurm_adapter._slurm_status.update_status))
+            self.assertIsNone(
+                asyncio.run(self.slurm_adapter._slurm_status.update_status())
+            )
 
-    @mock_executor_run_command(stdout=SINFO_RETURN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in drain_machine
+            AttributeDict(return_value=0),  # scontrol call in drain_machine
+        ]
+    )
     def test_drain_machine_without_options(self):
         self.setup_config_mock()
         self.slurm_adapter = SlurmAdapter()
 
-        run_async(self.slurm_adapter.drain_machine, drone_uuid="VM-1")
+        asyncio.run(self.slurm_adapter.drain_machine(drone_uuid="VM-1"))
         self.mock_executor.return_value.run_command.assert_called_with(
             "scontrol update NodeName=host-10-18-1-1 State=DRAIN Reason='COBalD/TARDIS'"
         )
@@ -113,31 +125,45 @@ class TestSlurmAdapter(TestCase):
 
     def test_integrate_machine(self):
         self.assertIsNone(
-            run_async(self.slurm_adapter.integrate_machine, drone_uuid="VM-1")
+            asyncio.run(self.slurm_adapter.integrate_machine(drone_uuid="VM-1"))
         )
 
-    @mock_executor_run_command(stdout=SINFO_RETURN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
+        ]
+    )
     def test_get_resource_ratios(self):
         self.assertEqual(
-            list(run_async(self.slurm_adapter.get_resource_ratios, drone_uuid="VM-1")),
+            list(
+                asyncio.run(self.slurm_adapter.get_resource_ratios(drone_uuid="VM-1"))
+            ),
             [self.cpu_ratio, self.memory_ratio],
         )
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
         self.mock_executor.reset_mock()
 
         self.assertEqual(
-            run_async(self.slurm_adapter.get_resource_ratios, drone_uuid="not_exists"),
+            asyncio.run(
+                self.slurm_adapter.get_resource_ratios(drone_uuid="not_exists")
+            ),
             {},
         )
 
-    @mock_executor_run_command(stdout=SINFO_RETURN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
+        ]
+    )
     def test_get_resource_ratios_without_options(self):
         self.setup_config_mock()
         del self.config.BatchSystem.options
         self.slurm_adapter = SlurmAdapter()
 
         self.assertEqual(
-            list(run_async(self.slurm_adapter.get_resource_ratios, drone_uuid="VM-1")),
+            list(
+                asyncio.run(self.slurm_adapter.get_resource_ratios(drone_uuid="VM-1"))
+            ),
             [self.cpu_ratio, self.memory_ratio],
         )
 
@@ -145,20 +171,31 @@ class TestSlurmAdapter(TestCase):
             self.command_wo_options
         )
 
-    @mock_executor_run_command(stdout=SINFO_RETURN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
+        ]
+    )
     def test_get_allocation(self):
         self.assertEqual(
-            run_async(self.slurm_adapter.get_allocation, drone_uuid="VM-1"),
+            asyncio.run(self.slurm_adapter.get_allocation(drone_uuid="VM-1")),
             max([self.cpu_ratio, self.memory_ratio]),
         )
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
 
         self.assertEqual(
-            run_async(self.slurm_adapter.get_allocation, drone_uuid="not_exists"),
+            asyncio.run(self.slurm_adapter.get_allocation(drone_uuid="not_exists")),
             0.0,
         )
 
-    @mock_executor_run_command(stdout=SINFO_RETURN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_machine_status
+            CommandExecutionFailure(
+                message="Test", exit_code=123, stderr="Test", stdout="Test"
+            ),  # sinfo call in get_machine_status, 2nd call
+        ]
+    )
     def test_get_machine_status(self):
         state_mapping = {
             "VM-1": MachineStatus.Available,
@@ -171,17 +208,11 @@ class TestSlurmAdapter(TestCase):
 
         for machine, state in state_mapping.items():
             self.assertEqual(
-                run_async(self.slurm_adapter.get_machine_status, drone_uuid=machine),
+                asyncio.run(self.slurm_adapter.get_machine_status(drone_uuid=machine)),
                 state,
             )
 
         self.mock_executor.reset_mock()
-
-        self.mock_executor.return_value.run_command.side_effect = (
-            CommandExecutionFailure(
-                message="Test", exit_code=123, stderr="Test", stdout="Test"
-            )
-        )
 
         attributes = {
             "statelong": "statelong",
@@ -193,9 +224,8 @@ class TestSlurmAdapter(TestCase):
         }
         with self.assertLogs(level="WARN"):
             with self.assertRaises(CommandExecutionFailure):
-                run_async(
-                    partial(
-                        slurm_status_updater,
+                asyncio.run(
+                    slurm_status_updater(
                         self.config.BatchSystem.options,
                         attributes,
                         self.mock_executor.return_value,
@@ -205,16 +235,20 @@ class TestSlurmAdapter(TestCase):
 
         self.mock_executor.return_value.run_command.side_effect = None
 
-    @mock_executor_run_command(stdout=SINFO_RETURN)
+    @mock_executor_run_command(
+        [
+            AttributeDict(stdout=SINFO_RETURN),  # sinfo call in get_resource_ratios
+        ]
+    )
     def test_get_utilisation(self):
         self.assertEqual(
-            run_async(self.slurm_adapter.get_utilisation, drone_uuid="VM-1"),
+            asyncio.run(self.slurm_adapter.get_utilisation(drone_uuid="VM-1")),
             min([self.cpu_ratio, self.memory_ratio]),
         )
         self.mock_executor.return_value.run_command.assert_called_with(self.command)
 
         self.assertEqual(
-            run_async(self.slurm_adapter.get_utilisation, drone_uuid="not_exists"),
+            asyncio.run(self.slurm_adapter.get_utilisation(drone_uuid="not_exists")),
             0.0,
         )
 

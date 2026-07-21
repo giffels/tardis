@@ -1,8 +1,9 @@
 from tardis.utilities.pipeline import PipelineProcessor
 from tardis.utilities.pipeline import StopProcessing
-from tests.utilities.utilities import run_async
 
 from unittest import TestCase
+
+import asyncio
 
 
 class TestPipelineProcessor(TestCase):
@@ -16,10 +17,11 @@ class TestPipelineProcessor(TestCase):
 
     def test_pipeline_processor(self):
         self.assertEqual(
-            run_async(
-                self.pipeline_processor.run_pipeline,
-                pipeline_input=10,
-                drone="drone_place_holder",
+            asyncio.run(
+                self.pipeline_processor.run_pipeline(
+                    pipeline_input=10,
+                    drone="drone_place_holder",
+                )
             ),
             1,
         )
@@ -32,10 +34,11 @@ class TestPipelineProcessor(TestCase):
 
         self.pipeline_processor.add_to_pipeline(test_add)
         self.assertEqual(
-            run_async(
-                self.pipeline_processor.run_pipeline,
-                pipeline_input=10,
-                drone="drone_place_holder",
+            asyncio.run(
+                self.pipeline_processor.run_pipeline(
+                    pipeline_input=10,
+                    drone="drone_place_holder",
+                )
             ),
             2,
         )
@@ -48,10 +51,11 @@ class TestPipelineProcessor(TestCase):
 
         pipeline_processor = PipelineProcessor([test_stop_processing])
         self.assertEqual(
-            run_async(
-                pipeline_processor.run_pipeline,
-                pipeline_input=10,
-                drone="drone_place_holder",
+            asyncio.run(
+                pipeline_processor.run_pipeline(
+                    pipeline_input=10,
+                    drone="drone_place_holder",
+                )
             ),
             99,
         )

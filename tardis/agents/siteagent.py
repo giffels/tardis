@@ -51,7 +51,9 @@ class SiteAgent(SiteAdapter):
         self, resource_attributes: AttributeDict
     ) -> AttributeDict:
         with self._site_adapter.handle_exceptions():
-            return await self._site_adapter.resource_status(resource_attributes)
+            return await self._site_adapter.resource_status(
+                resource_attributes=resource_attributes
+            )
 
     @property
     def site_name(self) -> str:
@@ -59,8 +61,12 @@ class SiteAgent(SiteAdapter):
 
     async def stop_resource(self, resource_attributes: AttributeDict):
         with self._site_adapter.handle_exceptions():
-            return await self._site_adapter.stop_resource(resource_attributes)
+            return await self._site_adapter.stop_resource(
+                resource_attributes=resource_attributes
+            )
 
     async def terminate_resource(self, resource_attributes: AttributeDict):
         with self._site_adapter.handle_exceptions():
-            return await self._site_adapter.terminate_resource(resource_attributes)
+            return await self._site_adapter.terminate_resource(
+                resource_attributes=resource_attributes
+            )
