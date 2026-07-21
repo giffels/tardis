@@ -1,4 +1,3 @@
-from collections import defaultdict
 from datetime import datetime
 import asyncio
 import logging
@@ -14,7 +13,6 @@ from ..exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
 from ..interfaces.batchsystemadapter import MachineStatus
 from ..interfaces.state import State
 from ..interfaces.siteadapter import ResourceStatus
-from ..utilities.pipeline import StopProcessing
 
 if TYPE_CHECKING:
     from tardis.resources.drone import Drone
@@ -22,61 +20,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger("cobald.runtime.tardis.resources.dronestates")
 
 
-async def batchsystem_machine_status(
-    state_transition, drone: "Drone", current_state: Type[State]
-):
+async def batchsystem_machine_status(drone: "Drone"):
     machine_status = await drone.batch_system_agent.get_machine_status(
         drone_uuid=drone.resource_attributes["drone_uuid"]
     )
-    return state_transition[machine_status]()
+    return machine_status
 
 
-async def check_remote_draining(
-    state_transition, drone: "Drone", current_state: Type[State]
-):
+async def check_remote_draining(drone: "Drone") -> bool:
     database_state = await drone.database_state()
-
-    if database_state is DrainState and database_state is not current_state:
-        raise StopProcessing(last_result=database_state())
-    return state_transition
+    return database_state is DrainState
 
 
-async def check_demand(state_transition, drone: "Drone", current_state: Type[State]):
+async def check_demand(drone: "Drone"):
     if not drone.demand:
         drone._supply = 0.0
-        if current_state in (BootingState,):
-            raise StopProcessing(last_result=CleanupState())  # static state transition
-        else:
-            raise StopProcessing(last_result=DrainState())  # static state transition
-    return state_transition
+    return drone.demand
 
 
-async def check_minimum_lifetime(
-    state_transition, drone: "Drone", current_state: Type[State]
-):
-    if (
-        drone.minimum_lifetime
-        and (datetime.now() - drone.resource_attributes.updated).total_seconds()
-        > drone.minimum_lifetime
-    ):
-        raise StopProcessing(last_result=DrainState())
-    return state_transition
+async def check_minimum_lifetime(drone: "Drone") -> bool:
+    if not drone.minimum_lifetime:
+        return False
+    return (
+        datetime.now() - drone.resource_attributes.updated
+    ).total_seconds() > drone.minimum_lifetime
 
 
-async def resource_status(state_transition, drone: "Drone", current_state: Type[State]):
-    try:
-        drone.resource_attributes.update(
-            await drone.site_agent.resource_status(drone.resource_attributes)
-        )
-        logger.debug(f"Resource attributes: {drone.resource_attributes}")
-    except (TardisAuthError, TardisTimeout, TardisResourceStatusUpdateFailed) as err:
-        #  Retry to get current state of the resource
-        raise StopProcessing(last_result=current_state()) from err
-    except TardisDroneCrashed as tdc:
-        #  Try to cleanup crashed resources
-        raise StopProcessing(last_result=CleanupState()) from tdc
-    else:
-        return state_transition[drone.resource_attributes.resource_status]()
+async def resource_status(drone: "Drone"):
+    drone.resource_attributes.update(
+        await drone.site_agent.resource_status(drone.resource_attributes)
+    )
+    logger.debug(f"Resource attributes: {drone.resource_attributes}")
+    return drone.resource_attributes.resource_status
 
 
 class RequestState(State):
@@ -101,20 +76,26 @@ class RequestState(State):
 
 
 class BootingState(State):
-    transition = {
-        ResourceStatus.Booting: lambda: BootingState(),
-        ResourceStatus.Running: lambda: IntegrateState(),
-        ResourceStatus.Deleted: lambda: DownState(),
-        ResourceStatus.Stopped: lambda: CleanupState(),
-        ResourceStatus.Error: lambda: CleanupState(),
-    }
-
-    processing_pipeline = [check_demand, resource_status]
+    task_pipeline = [check_demand, resource_status]
 
     @classmethod
-    async def run(cls, drone: "Drone"):
-        logger.info(f"Drone {drone.resource_attributes} in BootingState")
-        await drone.set_state(await cls.run_processing_pipeline(drone))
+    async def transition_logic(cls, *pipeline_results) -> Type[State]:
+        demand, resource_status = pipeline_results
+        match (demand, resource_status):
+            case (0.0, _):
+                return CleanupState
+            case (_, ResourceStatus.Booting):
+                return BootingState
+            case (_, ResourceStatus.Running):
+                return IntegrateState
+            case (_, ResourceStatus.Deleted):
+                return DownState
+            case (_, ResourceStatus.Error | ResourceStatus.Stopped):
+                return CleanupState
+            case _:
+                raise Exception(
+                    f"Unknown state transition: {demand}, {resource_status}"
+                )
 
 
 class IntegrateState(State):
@@ -128,42 +109,37 @@ class IntegrateState(State):
 
 
 class IntegratingState(State):
-    transition = {
-        ResourceStatus.Running: lambda: {
-            MachineStatus.NotAvailable: lambda: IntegratingState(),
-            MachineStatus.Available: lambda: AvailableState(),
-            MachineStatus.Draining: lambda: DrainingState(),
-            MachineStatus.Drained: lambda: DisintegrateState(),
-        },
-        ResourceStatus.Booting: lambda: defaultdict(lambda: BootingState),
-        ResourceStatus.Deleted: lambda: defaultdict(lambda: DownState),
-        ResourceStatus.Stopped: lambda: defaultdict(lambda: CleanupState),
-        ResourceStatus.Error: lambda: defaultdict(lambda: CleanupState),
-    }
-
-    processing_pipeline = [resource_status, batchsystem_machine_status]
+    task_pipeline = [resource_status, batchsystem_machine_status]
 
     @classmethod
-    async def run(cls, drone: "Drone"):
-        logger.info(f"Drone {drone.resource_attributes} in IntegratingState")
-        await drone.set_state(await cls.run_processing_pipeline(drone))
+    async def transition_logic(cls, *pipeline_results) -> Type["State"]:
+        resource_status, batchsystem_machine_status = pipeline_results
+
+        match (resource_status, batchsystem_machine_status):
+            case (ResourceStatus.Running, MachineStatus.Available):
+                return AvailableState
+            case (ResourceStatus.Running, MachineStatus.NotAvailable):
+                return IntegratingState
+            case (ResourceStatus.Running, MachineStatus.Draining):
+                return DrainingState
+            case (ResourceStatus.Running, MachineStatus.Drained):
+                return DisintegrateState
+            case (ResourceStatus.Booting, _):
+                return BootingState
+            case (ResourceStatus.Deleted, _):
+                return DownState
+            case (ResourceStatus.Stopped, _):
+                return CleanupState
+            case (ResourceStatus.Error, _):
+                return CleanupState
+            case _:
+                raise Exception(
+                    f"Unknown state transition: {resource_status}, {batchsystem_machine_status}"  # noqa B950
+                )
 
 
 class AvailableState(State):
-    transition = {
-        ResourceStatus.Running: lambda: {
-            MachineStatus.Available: lambda: AvailableState(),
-            MachineStatus.NotAvailable: lambda: ShutDownState(),
-            MachineStatus.Draining: lambda: DrainingState(),
-            MachineStatus.Drained: lambda: DisintegrateState(),
-        },
-        ResourceStatus.Booting: lambda: defaultdict(lambda: BootingState),
-        ResourceStatus.Deleted: lambda: defaultdict(lambda: DownState),
-        ResourceStatus.Stopped: lambda: defaultdict(lambda: CleanupState),
-        ResourceStatus.Error: lambda: defaultdict(lambda: CleanupState),
-    }
-
-    processing_pipeline = [
+    task_pipeline = [
         check_remote_draining,
         check_demand,
         check_minimum_lifetime,
@@ -172,12 +148,35 @@ class AvailableState(State):
     ]
 
     @classmethod
-    async def run(cls, drone: "Drone"):
-        logger.info(f"Drone {drone.resource_attributes} in AvailableState")
+    async def transition_logic(cls, *pipeline_results) -> Type["State"]:
+        remote_draining, demand, lifetime_exceeded, resource_status, batch_status = (
+            pipeline_results
+        )
 
-        new_state = await cls.run_processing_pipeline(drone)
+        if remote_draining or demand == 0.0 or lifetime_exceeded:
+            return DrainState
 
-        await drone.set_state(new_state)
+        match (resource_status, batch_status):
+            case (ResourceStatus.Running, MachineStatus.Available):
+                return AvailableState
+            case (ResourceStatus.Running, MachineStatus.NotAvailable):
+                return ShutDownState
+            case (ResourceStatus.Running, MachineStatus.Draining):
+                return DrainingState
+            case (ResourceStatus.Running, MachineStatus.Drained):
+                return DisintegrateState
+            case (ResourceStatus.Booting, _):
+                return BootingState
+            case (ResourceStatus.Deleted, _):
+                return DownState
+            case (ResourceStatus.Stopped, _):
+                return CleanupState
+            case (ResourceStatus.Error, _):
+                return CleanupState
+            case _:
+                raise Exception(
+                    f"Unknown state transition: {resource_status}, {batch_status}"
+                )
 
 
 class DrainState(State):
@@ -192,26 +191,33 @@ class DrainState(State):
 
 
 class DrainingState(State):
-    transition = {
-        ResourceStatus.Running: lambda: {
-            MachineStatus.Draining: lambda: DrainingState(),
-            MachineStatus.Available: lambda: DrainState(),
-            MachineStatus.Drained: lambda: DisintegrateState(),
-            MachineStatus.NotAvailable: lambda: ShutDownState(),
-        },
-        # In case the job is retried by HTCondor, resources can transition to
-        # BootingState again. In this case the job should be removed.
-        ResourceStatus.Booting: lambda: defaultdict(lambda: CleanupState),
-        ResourceStatus.Deleted: lambda: defaultdict(lambda: DownState),
-        ResourceStatus.Stopped: lambda: defaultdict(lambda: CleanupState),
-        ResourceStatus.Error: lambda: defaultdict(lambda: CleanupState),
-    }
-    processing_pipeline = [resource_status, batchsystem_machine_status]
+    task_pipeline = [resource_status, batchsystem_machine_status]
 
     @classmethod
-    async def run(cls, drone: "Drone"):
-        logger.info(f"Drone {drone.resource_attributes} in DrainingState")
-        await drone.set_state(await cls.run_processing_pipeline(drone))
+    async def transition_logic(cls, *pipeline_results) -> Type["State"]:
+        resource_status, batchsystem_machine_status = pipeline_results
+        match (resource_status, batchsystem_machine_status):
+            case (ResourceStatus.Running, MachineStatus.Draining):
+                return DrainingState
+            case (ResourceStatus.Running, MachineStatus.Available):
+                return DrainState
+            case (ResourceStatus.Running, MachineStatus.Drained):
+                return DisintegrateState
+            case (ResourceStatus.Running, MachineStatus.NotAvailable):
+                return ShutDownState
+            case (ResourceStatus.Booting, _):
+                return CleanupState
+            case (ResourceStatus.Deleted, _):
+                return DownState
+            case (ResourceStatus.Stopped, _):
+                return CleanupState
+            case (ResourceStatus.Error, _):
+                return CleanupState
+            case _:
+                raise Exception(
+                    f"Unknown state transition: {resource_status}, "
+                    f"{batchsystem_machine_status}"
+                )
 
 
 class DisintegrateState(State):
@@ -225,77 +231,86 @@ class DisintegrateState(State):
 
 
 class ShutDownState(State):
-    transition = {
-        # In case the job is retried by HTCondor, resources can transition to
-        # BootingState again. In this case the job should be removed.
-        ResourceStatus.Booting: lambda: CleanupState(),
-        ResourceStatus.Running: lambda: ShuttingDownState(),
-        ResourceStatus.Stopped: lambda: CleanupState(),
-        ResourceStatus.Deleted: lambda: DownState(),
-        ResourceStatus.Error: lambda: CleanupState(),
-    }
-
-    processing_pipeline = [resource_status]
+    task_pipeline = [resource_status]
 
     @classmethod
-    async def run(cls, drone: "Drone"):
-        logger.info(f"Drone {drone.resource_attributes} in ShutDownState")
-        logger.debug(
-            f"Stopping VM with ID {drone.resource_attributes.remote_resource_uuid}"
-        )
+    async def transition_logic(cls, *pipeline_results) -> Type["State"]:
+        (resource_status,) = pipeline_results
+        match (resource_status):
+            case ResourceStatus.Booting:
+                return CleanupState
+            case ResourceStatus.Running:
+                return ShuttingDownState
+            case ResourceStatus.Stopped:
+                return CleanupState
+            case ResourceStatus.Deleted:
+                return DownState
+            case ResourceStatus.Error:
+                return CleanupState
+            case _:
+                raise Exception(f"Unknown state transition: {resource_status}")
 
-        new_state = await cls.run_processing_pipeline(drone)
-        if isinstance(new_state, ShuttingDownState):
+    @classmethod
+    async def on_leave(
+        cls, drone: "Drone", target_state: Type["State"]
+    ) -> Type["State"]:
+        if target_state is ShuttingDownState:
             try:
+                logger.debug(
+                    f"Stopping VM with ID {drone.resource_attributes.remote_resource_uuid}"  # noqa B950
+                )
                 await drone.site_agent.stop_resource(drone.resource_attributes)
             except TardisResourceStatusUpdateFailed:
                 logger.warning(
                     f"Calling stop_resource failed for drone "
                     f"{drone.resource_attributes.drone_uuid}"
                 )
-                new_state = ShutDownState()
-        await drone.set_state(new_state)
+                return ShutDownState
+        return target_state
 
 
 class ShuttingDownState(State):
-    transition = {
-        # In case the job is retried by HTCondor, resources can transition to
-        # BootingState again. In this case the job should be removed.
-        ResourceStatus.Booting: lambda: CleanupState(),
-        ResourceStatus.Running: lambda: ShuttingDownState(),
-        ResourceStatus.Stopped: lambda: CleanupState(),
-        ResourceStatus.Deleted: lambda: DownState(),
-        ResourceStatus.Error: lambda: CleanupState(),
-    }
-    processing_pipeline = [resource_status]
+    task_pipeline = [resource_status]
 
     @classmethod
-    async def run(cls, drone: "Drone"):
-        logger.info(f"Drone {drone.resource_attributes} in ShuttingDownState")
-        logger.debug(
-            f"Checking Status of drone with ID "
-            f"{drone.resource_attributes.remote_resource_uuid}"
-        )
-        await drone.set_state(await cls.run_processing_pipeline(drone))
+    async def transition_logic(cls, *pipeline_results) -> Type[State]:
+        (resource_status,) = pipeline_results
+        match (resource_status):
+            case ResourceStatus.Booting | ResourceStatus.Stopped | ResourceStatus.Error:
+                return CleanupState
+            case ResourceStatus.Running:
+                return ShuttingDownState
+            case ResourceStatus.Deleted:
+                return DownState
+            case _:
+                raise Exception(f"Unknown state transition: {resource_status}")
 
 
 class CleanupState(State):
-    transition = {
-        ResourceStatus.Booting: lambda: CleanupState(),
-        ResourceStatus.Running: lambda: DrainState(),
-        ResourceStatus.Stopped: lambda: CleanupState(),
-        ResourceStatus.Deleted: lambda: DownState(),
-        ResourceStatus.Error: lambda: CleanupState(),
-    }
-    processing_pipeline = [resource_status]
+    task_pipeline = [resource_status]
 
     @classmethod
-    async def run(cls, drone: "Drone"):
-        logger.info(f"Drone {drone.resource_attributes} in CleanupState")
+    async def transition_logic(cls, *pipeline_results) -> Type["State"]:
+        (resource_status,) = pipeline_results
+        match (resource_status):
+            case ResourceStatus.Booting:
+                return CleanupState
+            case ResourceStatus.Running:
+                return DrainState
+            case ResourceStatus.Stopped:
+                return CleanupState
+            case ResourceStatus.Deleted:
+                return DownState
+            case ResourceStatus.Error:
+                return CleanupState
+            case _:
+                raise Exception(f"Unknown state transition: {resource_status}")
 
-        new_state = await cls.run_processing_pipeline(drone)
-
-        if isinstance(new_state, CleanupState):
+    @classmethod
+    async def on_leave(
+        cls, drone: "Drone", target_state: Type["State"]
+    ) -> Type["State"]:
+        if target_state is CleanupState:
             try:
                 logger.debug(
                     f"Destroying VM with ID "
@@ -307,14 +322,13 @@ class CleanupState(State):
                     f"Calling terminate_resource failed for drone "
                     f"{drone.resource_attributes.drone_uuid}. Drone crashed!"
                 )
-                new_state = DownState()
+                return DownState
             except TardisResourceStatusUpdateFailed:
                 logger.warning(
                     f"Calling terminate_resource failed for drone "
                     f"{drone.resource_attributes.drone_uuid}. Will retry later!"
                 )
-
-        await drone.set_state(new_state)  # static state transition
+        return target_state
 
 
 class DownState(State):
