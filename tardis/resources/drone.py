@@ -150,9 +150,8 @@ class Drone(Pool):
         else:
             self._state = state
 
-        match state:
-            case AvailableState():
-                await self.refresh_drone_metrics()
+        if state.__class__ is AvailableState:
+            await self.refresh_drone_metrics()
 
     @property
     def state(self) -> Optional[State]:
