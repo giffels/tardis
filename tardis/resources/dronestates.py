@@ -9,6 +9,7 @@ from ..exceptions.tardisexceptions import TardisDroneCrashed
 from ..exceptions.tardisexceptions import TardisTimeout
 from ..exceptions.tardisexceptions import TardisQuotaExceeded
 from ..exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
+from ..exceptions.tardisexceptions import TardisUnknownStateTransition
 from ..interfaces.batchsystemadapter import MachineStatus
 from ..interfaces.state import State
 from ..interfaces.siteadapter import ResourceStatus
@@ -92,8 +93,8 @@ class BootingState(State):
             case (_, ResourceStatus.Error | ResourceStatus.Stopped):
                 return CleanupState
             case _:
-                raise Exception(
-                    f"Unknown state transition: {demand}, {resource_status}"
+                raise TardisUnknownStateTransition(
+                    cls, demand=demand, resource_status=resource_status
                 )
 
 
@@ -132,8 +133,10 @@ class IntegratingState(State):
             case (ResourceStatus.Error, _):
                 return CleanupState
             case _:
-                raise Exception(
-                    f"Unknown state transition: {resource_status}, {batchsystem_machine_status}"  # noqa B950
+                raise TardisUnknownStateTransition(
+                    cls,
+                    resource_status=resource_status,
+                    batchsystem_machine_status=batchsystem_machine_status,
                 )
 
 
@@ -148,14 +151,18 @@ class AvailableState(State):
 
     @classmethod
     async def transition_logic(cls, *pipeline_results) -> Type["State"]:
-        remote_draining, demand, lifetime_exceeded, resource_status, batch_status = (
-            pipeline_results
-        )
+        (
+            remote_draining,
+            demand,
+            lifetime_exceeded,
+            resource_status,
+            batchsystem_machine_status,
+        ) = pipeline_results
 
         if remote_draining or demand == 0.0 or lifetime_exceeded:
             return DrainState
 
-        match (resource_status, batch_status):
+        match (resource_status, batchsystem_machine_status):
             case (ResourceStatus.Running, MachineStatus.Available):
                 return AvailableState
             case (ResourceStatus.Running, MachineStatus.NotAvailable):
@@ -173,8 +180,13 @@ class AvailableState(State):
             case (ResourceStatus.Error, _):
                 return CleanupState
             case _:
-                raise Exception(
-                    f"Unknown state transition: {resource_status}, {batch_status}"
+                raise TardisUnknownStateTransition(
+                    cls,
+                    remote_draining=remote_draining,
+                    demand=demand,
+                    lifetime_exceeded=lifetime_exceeded,
+                    resource_status=resource_status,
+                    batchsystem_machine_status=batchsystem_machine_status,
                 )
 
 
@@ -213,9 +225,10 @@ class DrainingState(State):
             case (ResourceStatus.Error, _):
                 return CleanupState
             case _:
-                raise Exception(
-                    f"Unknown state transition: {resource_status}, "
-                    f"{batchsystem_machine_status}"
+                raise TardisUnknownStateTransition(
+                    cls,
+                    resource_status=resource_status,
+                    batchsystem_machine_status=batchsystem_machine_status,
                 )
 
 
@@ -247,7 +260,7 @@ class ShutDownState(State):
             case ResourceStatus.Error:
                 return CleanupState
             case _:
-                raise Exception(f"Unknown state transition: {resource_status}")
+                raise TardisUnknownStateTransition(cls, resource_status=resource_status)
 
     @classmethod
     async def on_leave(
@@ -282,7 +295,7 @@ class ShuttingDownState(State):
             case ResourceStatus.Deleted:
                 return DownState
             case _:
-                raise Exception(f"Unknown state transition: {resource_status}")
+                raise TardisUnknownStateTransition(cls, resource_status=resource_status)
 
 
 class CleanupState(State):
@@ -303,7 +316,7 @@ class CleanupState(State):
             case ResourceStatus.Error:
                 return CleanupState
             case _:
-                raise Exception(f"Unknown state transition: {resource_status}")
+                raise TardisUnknownStateTransition(cls, resource_status=resource_status)
 
     @classmethod
     async def on_leave(
