@@ -2,7 +2,12 @@ from tardis.interfaces.plugin import Plugin
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.interfaces.state import State
 from tardis.resources.drone import Drone
-from tardis.resources.dronestates import DrainState, DownState, RequestState
+from tardis.resources.dronestates import (
+    AvailableState,
+    DrainState,
+    DownState,
+    RequestState,
+)
 from tardis.plugins.sqliteregistry import SqliteRegistry
 from tardis.utilities.attributedict import AttributeDict
 
@@ -33,6 +38,8 @@ class TestDrone(TestCase):
         cls.mock_site_agent_patcher.stop()
 
     def setUp(self) -> None:
+        self.mock_batch_system_agent.get_allocation = AsyncMock(return_value=1.0)
+        self.mock_batch_system_agent.get_utilisation = AsyncMock(return_value=1.0)
         self.mock_site_agent.machine_meta_data = AttributeDict(Cores=8)
         self.mock_site_agent.drone_minimum_lifetime = None
         self.mock_site_agent.drone_heartbeat_interval = 60
@@ -184,6 +191,27 @@ class TestDrone(TestCase):
         )
         self.assertNotEqual(
             self.drone.resource_attributes.updated, old_update_time_stamp
+        )
+
+        # test refresh_drone_metrics is called in set_state
+        # prepare test values to be changed
+        self.drone._supply, self.drone._allocation, self.drone._utilisation = (
+            0.0,
+            0.0,
+            0.0,
+        )
+
+        new_state = AvailableState()
+        asyncio.run(self.drone.set_state(new_state))
+        self.assertEqual(self.drone.supply, 8.0)
+        self.assertEqual(self.drone.allocation, 1.0)
+        self.assertEqual(self.drone.utilisation, 1.0)
+
+        self.mock_batch_system_agent.get_allocation.assert_called_with(
+            drone_uuid=self.drone.resource_attributes["drone_uuid"]
+        )
+        self.mock_batch_system_agent.get_utilisation.assert_called_with(
+            drone_uuid=self.drone.resource_attributes["drone_uuid"]
         )
 
     def test_state(self):
