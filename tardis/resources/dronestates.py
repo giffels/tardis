@@ -285,7 +285,7 @@ class ShutDownState(State):
                     f"Calling stop_resource failed for drone "
                     f"{drone.resource_attributes.drone_uuid}"
                 )
-                return ShutDownState
+                raise
         return target_state
 
 
@@ -346,12 +346,13 @@ class CleanupState(State):
                     f"Calling terminate_resource failed for drone "
                     f"{drone.resource_attributes.drone_uuid}. Drone crashed!"
                 )
-                return DownState
+                raise
             except TardisResourceStatusUpdateFailed:
                 logger.warning(
                     f"Calling terminate_resource failed for drone "
                     f"{drone.resource_attributes.drone_uuid}. Will retry later!"
                 )
+                raise
         return target_state
 
 

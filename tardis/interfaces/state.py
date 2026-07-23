@@ -42,6 +42,8 @@ class State:
             target_state = await cls.transition_logic(
                 *await asyncio.gather(*(task(drone) for task in cls.task_pipeline))
             )
+            next_state = await cls.on_leave(drone, target_state)
+            await drone.set_state(next_state())
         except (
             TardisAuthError,
             TardisTimeout,
@@ -53,10 +55,13 @@ class State:
             # avoid circular import by using the state registry
             cleanup_cls = cls._state_registry.get("CleanupState")
             assert cleanup_cls is not None, "CleanupState is not implemented"
-            await drone.set_state(cleanup_cls())
-        else:
-            next_state = await cls.on_leave(drone, target_state)
-            await drone.set_state(next_state())
+            downstate_cls = cls._state_registry["DownState"]
+            assert downstate_cls is not None, "DownState is not implemented"
+            if cls.__name__ == "CleanupState":
+                # Avoid infinite recursion if CleanupState is the current state
+                await drone.set_state(downstate_cls())
+            else:
+                await drone.set_state(cleanup_cls())
 
     @classmethod
     async def transition_logic(cls, *pipeline_results) -> Type["State"]:
