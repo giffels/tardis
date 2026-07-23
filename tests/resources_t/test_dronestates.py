@@ -3,7 +3,7 @@ from tardis.exceptions.tardisexceptions import TardisDroneCrashed
 from tardis.exceptions.tardisexceptions import TardisTimeout
 from tardis.exceptions.tardisexceptions import TardisQuotaExceeded
 from tardis.exceptions.tardisexceptions import TardisResourceStatusUpdateFailed
-from tardis.exceptions.tardisexceptions import TardisUnknownStateTransition
+from tardis.exceptions.tardisexceptions import TardisInvalidStateTransition
 from tardis.interfaces.batchsystemadapter import MachineStatus
 from tardis.interfaces.siteadapter import ResourceStatus
 from tardis.resources.dronestates import check_minimum_lifetime
@@ -357,7 +357,7 @@ class TestDroneStates(TestCase):
         ]
 
         for state_class, pipeline_results in test_cases:
-            with self.assertRaises(TardisUnknownStateTransition) as ctx:
+            with self.assertRaises(TardisInvalidStateTransition) as ctx:
                 asyncio.run(state_class.transition_logic(*pipeline_results))
             self.assertIn(
                 f"Unknown state transition in {state_class.__name__}",
