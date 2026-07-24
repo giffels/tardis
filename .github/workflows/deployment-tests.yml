@@ -39,7 +39,7 @@ jobs:
         os_container: ['rockylinux8', 'rockylinux9', 'ubuntu22_04', 'ubuntu24_04']
     container: matterminers/cobald-tardis-deployment-test-env:${{ matrix.os_container }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies on ${{ matrix.os_container }}
         shell: bash
         run: |
@@ -61,7 +61,7 @@ jobs:
         platform: ['macos-latest']
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Add Python 3.12 to GITHUB_PATH
         run: echo "/Library/Frameworks/Python.framework/Versions/3.12/bin" >> $GITHUB_PATH
       - name: Install dependencies on ${{ matrix.platform }}
