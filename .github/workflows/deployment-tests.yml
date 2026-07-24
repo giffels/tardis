@@ -40,6 +40,8 @@ jobs:
     container: matterminers/cobald-tardis-deployment-test-env:${{ matrix.os_container }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install dependencies on ${{ matrix.os_container }}
         shell: bash
         run: |
@@ -62,6 +64,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Add Python 3.12 to GITHUB_PATH
         run: echo "/Library/Frameworks/Python.framework/Versions/3.12/bin" >> $GITHUB_PATH
       - name: Install dependencies on ${{ matrix.platform }}
